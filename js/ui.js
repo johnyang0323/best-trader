@@ -29,6 +29,7 @@
   /* ---------- 상태 ---------- */
   let playing = false, speed = 1, timer = null, tab = 'market';
   let sheetId = null, sheetRange = 156, sheetMode = 'buy', sheetQty = '', sheetErr = '', resume = false;
+  let cSide = 'sell', cDir = 'below', cBasis = 'price', cVal = '', cQty = '';
   let seenNews = 0;
   const DELAY = { 1: 900, 4: 225, 16: 56 };
 
@@ -132,7 +133,7 @@
   // 업종별 묶음. 머리줄에는 6개월 평균 등락과 지금 걸린 호재·악재를 보여 준다.
   let secOpen = {};
   function briefHtml(sector) {
-    const b = SK.sectorBrief(sector, G.world.t);
+    const b = G.world.brief(sector);
     return b.good.map((t) => '<span class="brief"><b class="up">호재</b>' + esc(t) + '</span>')
       .concat(b.bad.map((t) => '<span class="brief"><b class="down">악재</b>' + esc(t) + '</span>')).join('');
   }
@@ -177,7 +178,7 @@
         '<dl class="kv" id="pf-kv"></dl><div class="ladder" id="pf-ladder"></div>' +
         '<canvas class="chart" id="pf-chart"></canvas></div>' +
         '<h3 class="section-h">보유 종목</h3><div class="list" id="pf-list"></div><p class="empty" id="pf-empty">아직 보유한 종목이 없습니다. 시장 탭에서 종목을 눌러 매수하세요.</p>' +
-        '<h3 class="section-h">기록</h3><ul class="log" id="pf-log"></ul>';
+        '<h3 class="section-h" id="pf-orders-h">조건 주문</h3><div id="pf-orders"></div><h3 class="section-h">기록</h3><ul class="log" id="pf-log"></ul>';
       $('#pf-list').dataset.key = '';
     }
     const nw = G.netWorth(), ret = nw / S.startCap - 1, hv = G.holdingValue();
@@ -201,6 +202,9 @@
     const held = W.assets.filter((a) => S.holdings[a.id]);
     syncList($('#pf-list'), held, true);
     $('#pf-empty').hidden = held.length > 0;
+    const oh = ordersHtml(S.orders), ob = $('#pf-orders');
+    if (ob.dataset.h !== oh) { ob.dataset.h = oh; ob.innerHTML = oh; }
+    $('#pf-orders-h').hidden = !S.orders.length;
     $('#pf-log').innerHTML = S.log.map((l) => '<li><time>' + fmtDate(l.week) + '</time><span>' + esc(l.text) + '</span></li>').join('');
   }
 
@@ -281,6 +285,7 @@
     setPlaying(false);
     sheetId = id; sheetQty = ''; sheetErr = '';
     sheetMode = 'buy';
+    cSide = G.state.holdings[id] ? 'sell' : 'buy'; cDir = cSide === 'sell' ? 'below' : 'above'; cBasis = 'price'; cVal = ''; cQty = '';
     renderSheet();
     $('#sheet').hidden = false;
   }
@@ -294,6 +299,13 @@
   function sheetSummary() {
     const a = G.world.byId[sheetId], q = parseFloat(sheetQty) || 0, amt = q * a.price;
     if (sheetErr) return '<span class="err">' + esc(sheetErr) + '</span>';
+    if (sheetMode === 'cond') {
+      const v = parseFloat(cVal) || 0, cq = parseFloat(cQty) || 0, h = G.state.holdings[a.id];
+      if (!v || !cq) return cBasis === 'avg' ? (h ? '평단 ' + SK.fmtPx(h.avg) + unit() + ' 기준으로 몇 % 움직이면 주문할지 정합니다' : '평단 기준은 보유 중인 종목에만 걸 수 있습니다') : '현재가 ' + SK.fmtPx(a.price) + unit() + '. 기준 가격과 수량을 입력하세요';
+      const T = cBasis === 'price' ? v : h ? h.avg * (1 + ((cDir === 'below' ? -1 : 1) * v) / 100) : null;
+      return (cBasis === 'avg' && T !== null ? '평단 ' + SK.fmtPx(h.avg) + '의 ' + (cDir === 'below' ? '-' : '+') + v + '%인 ' : '') + (T === null ? '' : '<b>' + SK.fmtPx(T) + unit() + '</b> ') +
+        (cDir === 'below' ? '이하로 떨어지면 ' : '이상으로 오르면 ') + SK.fmtQty(cq, a) + (cSide === 'buy' ? ' 매수' : ' 매도') + '. 닿은 주의 가격으로 체결됩니다';
+    }
     if (sheetMode === 'buy') {
       const left = a.kind === 'crypto' ? G.btcLeft() : Infinity;
       const cap = left !== Infinity ? ' · 이번 주 매수 한도 ' + SK.fmtQty(left, a) : '';
@@ -301,6 +313,9 @@
     }
     return q ? '입금 <b>' + SK.fmtMoney(amt * (1 - G.FEE.sell)) + '</b> (수수료·세금 0.3% 차감)' : '보유 ' + SK.fmtQty(G.maxSell(a.id), a);
   }
+
+  const chipRow = (key, cur, opts) => '<div class="chips">' + opts.map(([v, l]) => '<button type="button" data-' + key + '="' + v + '" class="' + (v === cur ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
+  const ordersHtml = (list) => (list.length ? '<ul class="orders">' + list.map((o) => '<li><span>' + esc(SK.orderText(o)) + '</span><button type="button" data-cancel="' + o.id + '">취소</button></li>').join('') + '</ul>' : '');
 
   function renderSheet() {
     const a = G.world.byId[sheetId], h = G.state.holdings[a.id], box = $('#sheet');
@@ -319,11 +334,18 @@
       (h ? '<dl class="kv"><div><dt>보유</dt><dd>' + SK.fmtQty(h.qty, a) + '</dd></div><div><dt>평균 단가</dt><dd>' + SK.fmtPx(h.avg) + '</dd></div><div><dt>평가 손익</dt><dd class="' + cls(a.price - h.avg) + '">' +
         (a.price >= h.avg ? '+' : '') + SK.fmtMoney((a.price - h.avg) * h.qty) + ' (' + fmtPct(a.price / h.avg - 1) + ')</dd></div></dl>' : '') +
       (closed ? '<p class="sub">거래가 끝난 종목입니다.</p>' :
-        '<div class="trade"><div class="seg"><button type="button" data-mode="buy" class="' + (sheetMode === 'buy' ? 'on' : '') + '">매수</button><button type="button" data-mode="sell" class="' + (sheetMode === 'sell' ? 'on' : '') + '">매도</button></div>' +
-        '<label class="qty"><input id="sp-qty" type="text" inputmode="decimal" placeholder="수량" autocomplete="off" value="' + esc(sheetQty) + '"><span>' + (a.kind === 'crypto' ? 'BTC' : '주') + '</span></label>' +
+        '<div class="trade"><div class="seg">' + [['buy', '매수'], ['sell', '매도'], ['cond', '조건 주문']].map(([m, l]) => '<button type="button" data-mode="' + m + '" class="' + (sheetMode === m ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
+        (sheetMode === 'cond'
+          ? chipRow('cside', cSide, [['sell', '조건 매도'], ['buy', '조건 매수']]) +
+            chipRow('cdir', cDir, [['below', '이하로 떨어지면'], ['above', '이상으로 오르면']]) +
+            chipRow('cbasis', cBasis, [['price', '가격 기준'], ['avg', '평단 기준 %']]) +
+            '<label class="qty"><input id="sp-cval" type="text" inputmode="decimal" placeholder="' + (cBasis === 'price' ? '기준 가격' : '평단 대비') + '" autocomplete="off" value="' + esc(cVal) + '"><span>' + (cBasis === 'price' ? unit() : (cDir === 'below' ? '% 하락' : '% 상승')) + '</span></label>' +
+            '<label class="qty"><input id="sp-cqty" type="text" inputmode="decimal" placeholder="수량" autocomplete="off" value="' + esc(cQty) + '"><span>' + (a.kind === 'crypto' ? 'BTC' : '주') + '</span></label>'
+          : '<label class="qty"><input id="sp-qty" type="text" inputmode="decimal" placeholder="수량" autocomplete="off" value="' + esc(sheetQty) + '"><span>' + (a.kind === 'crypto' ? 'BTC' : '주') + '</span></label>') +
         '<div class="chips">' + [[0.1, '10%'], [0.25, '25%'], [0.5, '50%'], [1, '최대']].map(([v, l]) => '<button type="button" data-pct="' + v + '">' + l + '</button>').join('') + '</div>' +
         '<p class="sum" id="sp-sum">' + sheetSummary() + '</p>' +
-        '<div class="card-foot"><button type="button" class="ghost" data-act="step">1주 진행 ▸</button><button type="button" class="primary ' + sheetMode + '" data-act="go">' + (sheetMode === 'buy' ? '매수' : '매도') + '</button></div></div>') +
+        '<div class="card-foot"><button type="button" class="ghost" data-act="step">1주 진행 ▸</button><button type="button" class="primary ' + (sheetMode === 'cond' ? '' : sheetMode) + '" data-act="go">' + { buy: '매수', sell: '매도', cond: '조건 주문 등록' }[sheetMode] + '</button></div>' +
+        ordersHtml(G.state.orders.filter((o) => o.asset === a.id)) + '</div>') +
       '</div>';
     drawChart($('#sp-chart'), data, a.listWeek + a.hist.length - data.length, h ? h.avg : null);
   }
@@ -337,9 +359,18 @@
     if (b.dataset.act === 'close') return closeSheet();
     if (b.dataset.range !== undefined) sheetRange = +b.dataset.range;
     else if (b.dataset.mode) { sheetMode = b.dataset.mode; sheetQty = ''; }
+    else if (b.dataset.cside) { cSide = b.dataset.cside; cDir = cSide === 'sell' ? 'below' : 'above'; cQty = ''; }
+    else if (b.dataset.cdir) cDir = b.dataset.cdir;
+    else if (b.dataset.cbasis) { cBasis = b.dataset.cbasis; cVal = ''; }
+    else if (b.dataset.cancel) G.cancelOrder(+b.dataset.cancel);
     else if (b.dataset.pct) {
-      const max = sheetMode === 'buy' ? G.maxBuy(a.id) : G.maxSell(a.id), q = max * +b.dataset.pct;
-      sheetQty = String(a.kind === 'crypto' ? Math.floor(q * 1e4) / 1e4 : Math.floor(q));
+      const side = sheetMode === 'cond' ? cSide : sheetMode;
+      const max = side === 'buy' ? G.maxBuy(a.id) : G.maxSell(a.id), q = max * +b.dataset.pct;
+      const s = String(a.kind === 'crypto' ? Math.floor(q * 1e4) / 1e4 : Math.floor(q));
+      if (sheetMode === 'cond') cQty = s; else sheetQty = s;
+    } else if (b.dataset.act === 'go' && sheetMode === 'cond') {
+      sheetErr = G.addOrder({ asset: a.id, side: cSide, dir: cDir, basis: cBasis, value: parseFloat(cVal) || 0, qty: parseFloat(cQty) || 0 }) || '';
+      if (!sheetErr) { toast('조건 주문을 등록했습니다'); cVal = ''; cQty = ''; }
     } else if (b.dataset.act === 'go') {
       const q = parseFloat(sheetQty) || 0;
       sheetErr = (sheetMode === 'buy' ? G.buy(a.id, q) : G.sell(a.id, q)) || '';
@@ -355,9 +386,11 @@
     renderSheet();
   });
   $('#sheet').addEventListener('input', (e) => {
-    if (e.target.id !== 'sp-qty') return;
-    sheetQty = e.target.value.replace(/[^0-9.]/g, '');
-    if (sheetQty !== e.target.value) e.target.value = sheetQty;
+    const id = e.target.id;
+    if (id !== 'sp-qty' && id !== 'sp-cval' && id !== 'sp-cqty') return;
+    const v = e.target.value.replace(/[^0-9.]/g, '');
+    if (v !== e.target.value) e.target.value = v;
+    if (id === 'sp-qty') sheetQty = v; else if (id === 'sp-cval') cVal = v; else cQty = v;
     sheetErr = '';
     $('#sp-sum').innerHTML = sheetSummary();
   });
@@ -371,7 +404,7 @@
     openModal(
       '<div class="card-head"><div><h2>메뉴</h2><p class="sub">' + esc(G.state.name) + ' · ' + SK.RANKS[G.state.rank].name + '</p></div><button type="button" class="icon-btn" data-m="close" aria-label="닫기">×</button></div>' +
       '<label class="check"><input type="checkbox" id="opt-pause" ' + (G.state.autoPause ? 'checked' : '') + '>속보가 뜨면 시간 멈추기</label>' +
-      '<ul class="help"><li>한 번에 한 주씩 흐릅니다. 종목을 누르면 시간이 멈추고 매매 창이 열립니다.</li><li>매달 직급에 맞는 저축액이 현금으로 들어옵니다.</li><li>순자산이 늘면 승진합니다. 2026년 가치로 1조 원이면 증권왕입니다.</li><li>시장 탭은 업종별로 묶여 있습니다. 업종 이름을 누르면 종목이 펼쳐지고, 그 아래에 지금의 호재와 악재가 요약됩니다.</li><li>부도난 회사의 주식은 거의 전부 잃습니다. 뉴스를 확인하세요.</li><li>게임은 2026년 11월에 끝납니다. 진행 상황은 이 기기에 자동 저장됩니다.</li></ul>' +
+      '<ul class="help"><li>한 번에 한 주씩 흐릅니다. 종목을 누르면 시간이 멈추고 매매 창이 열립니다.</li><li>매달 직급에 맞는 저축액이 현금으로 들어옵니다.</li><li>순자산이 늘면 승진합니다. 2026년 가치로 1조 원이면 증권왕입니다.</li><li>시장 탭은 업종별로 묶여 있습니다. 업종 이름을 누르면 종목이 펼쳐지고, 그 아래에 지금의 호재와 악재가 요약됩니다.</li><li>호재와 악재가 모두 맞지는 않습니다. 헛소문도 있고, 이미 주가에 반영됐거나 거꾸로 가는 재료도 있습니다.</li><li>종목 창의 조건 주문으로 손절·익절·추격 매수를 미리 걸 수 있습니다. 가격 또는 평단 대비 %로 기준을 정합니다.</li><li>부도난 회사의 주식은 거의 전부 잃습니다. 뉴스를 확인하세요.</li><li>게임은 2026년 11월에 끝납니다. 진행 상황은 이 기기에 자동 저장됩니다.</li></ul>' +
       (confirming
         ? '<p class="err">지금 판을 버리고 처음으로 돌아갑니다.</p><div class="card-foot"><button type="button" class="ghost" data-m="close">계속하기</button><button type="button" class="primary" data-m="quit">버리고 나가기</button></div>'
         : '<div class="card-foot"><button type="button" class="ghost" data-m="ask-quit">새 게임</button><button type="button" class="primary" data-m="close">계속하기</button></div>'));
@@ -469,6 +502,8 @@
     if (b) setTab(b.dataset.tab);
   });
   $('#pane').addEventListener('click', (e) => {
+    const cx = e.target.closest('[data-cancel]');
+    if (cx) { G.cancelOrder(+cx.dataset.cancel); return renderAll(); }
     const sh = e.target.closest('.sec-head');
     if (sh) return toggleSector(sh.dataset.sector);
     const r = e.target.closest('.row');

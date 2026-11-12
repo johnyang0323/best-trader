@@ -43,20 +43,13 @@
     };
   }
 
-  // 지금 이 업종에 걸려 있는 호재·악재
-  SK.sectorBrief = function (sector, t) {
-    const out = { good: [], bad: [] };
-    for (const [a, b, v, text] of SK.SECTOR_WAVES[sector] || []) if (t >= a && t < b) (v > 0 ? out.good : out.bad).push(text);
-    return out;
+  // 근거 없이 도는 재료. 진짜 재료와 같은 모양으로 보인다.
+  const RUMORS = {
+    good: ['정부가 업종 육성책을 내놓았다', '대형 수출 계약 소식', '기관이 꾸준히 사들인다', '증권사들이 목표가를 올린다', '업황이 바닥을 지났다',
+      '신사업 진출 발표', '분기 실적이 예상을 웃돌았다', '규제 완화 방침', '수출 주문이 늘고 있다', '제품 가격 인상'],
+    bad: ['세무조사 착수', '대주주 지분 매각', '증권사들이 투자의견을 낮춘다', '업황이 정점을 지났다', '규제 강화 방침',
+      '분기 실적이 예상에 못 미쳤다', '자금 사정 악화', '업체 간 가격 경쟁', '기관이 물량을 내놓는다', '원가 부담 증가']
   };
-
-  function sectorDrift(sector, t) {
-    const waves = SK.SECTOR_WAVES[sector];
-    if (!waves) return 0;
-    let d = 0;
-    for (const [a, b, v] of waves) if (t >= a && t < b) d += v;
-    return d;
-  }
 
   const EVENT_WEEKS = SK.EVENTS.map(([d, title, body, major]) => {
     const [y, m, dd] = d.split('-').map(Number);
@@ -71,6 +64,23 @@
       return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd());
     };
 
+    // 진짜 재료도 판마다 세기가 다르고(이미 반영됐거나 거꾸로 가기도 한다), 뉴스가 도는 시점이 실제 효과보다 늦다
+    const waves = {};
+    for (const s in SK.SECTOR_WAVES) {
+      waves[s] = SK.SECTOR_WAVES[s].map(([from, to, v, text]) => {
+        const r = rnd(), len = to - from;
+        const m = Math.abs(v) >= 1.5 ? 0.7 + 0.5 * rnd() : r < 0.65 ? 0.6 + 0.7 * rnd() : r < 0.9 ? 0.3 * rnd() : -0.5;
+        return { from, to, v: v * m, good: v > 0, text, showFrom: from + Math.min(0.5, len * 0.3) * rnd(), showTo: to + Math.min(0.4, len * 0.25) * rnd() };
+      });
+    }
+    const rumors = []; // { sector, good, text, from, to (주차), v }
+    const sectorDrift = (sector, t, week) => {
+      let d = 0;
+      for (const x of waves[sector] || []) if (t >= x.from && t < x.to) d += x.v;
+      for (const x of rumors) if (x.sector === sector && week < x.to) d += x.v;
+      return d;
+    };
+
     const W = { seed, week: -1, t: 0, unit: '환', index: 0, idxHist: [], assets: [], byId: {}, news: [] };
     let noise = 0, prevA = null, btcNoise = 0;
 
@@ -79,6 +89,14 @@
       W.assets.push(a);
       W.byId[a.id] = a;
     }
+
+    // 지금 이 업종에 돌고 있는 호재·악재 (진짜와 가짜가 섞여 있다)
+    W.brief = function (sector) {
+      const out = { good: [], bad: [] };
+      for (const x of waves[sector] || []) if (W.t >= x.showFrom && W.t < x.showTo) (x.good ? out.good : out.bad).push(x.text);
+      for (const x of rumors) if (x.sector === sector && W.week < x.to) (x.good ? out.good : out.bad).push(x.text);
+      return out;
+    };
 
     W.step = function () {
       W.week++;
@@ -104,12 +122,22 @@
         evts.push({ type: 'reform' });
       }
 
-      // 업종 호재·악재가 시작되면 뉴스로 알린다
+      // 업종 재료: 진짜는 뉴스가 도는 시점에, 가짜는 가끔 생겨난다
       if (W.week > 0) {
         const prevT = SK.tOf(W.week - 1);
-        for (const sector in SK.SECTOR_WAVES) {
+        for (let i = rumors.length - 1; i >= 0; i--) if (rumors[i].to <= W.week) rumors.splice(i, 1);
+        for (const sector in waves) {
           if (!W.assets.some((a) => a.def.sector === sector && a.listed && !a.dead)) continue;
-          for (const [from, , v, text] of SK.SECTOR_WAVES[sector]) if (from > prevT && from <= t) news((v > 0 ? '호재 · ' : '악재 · ') + sector, text + '.');
+          for (const x of waves[sector]) if (x.showFrom > prevT && x.showFrom <= t) news((x.good ? '호재 · ' : '악재 · ') + sector, x.text + '.');
+          if (rumors.some((x) => x.sector === sector) || rnd() > 1 / 130) continue;
+          const good = rnd() < 0.5, r = rnd(), sign = good ? 1 : -1;
+          const x = {
+            sector, good, text: RUMORS[good ? 'good' : 'bad'][Math.floor(rnd() * 10)],
+            from: W.week, to: W.week + 16 + Math.floor(rnd() * 45),
+            v: r < 0.45 ? 0 : r < 0.75 ? -sign * 0.35 : sign * 0.4 // 절반 가까이는 헛소문, 일부는 거꾸로 간다
+          };
+          rumors.push(x);
+          news((good ? '호재 · ' : '악재 · ') + sector, x.text + '.');
         }
       }
 
@@ -135,7 +163,7 @@
           if (W.week > 0) news('신규 상장: ' + def.name, def.desc, a.kind === 'crypto');
         } else if (a.kind === 'stock') {
           const dev1 = a.dev * 0.996 + def.sigma * z;
-          a.lp += def.beta * (dA + dN) + (def.alpha + sectorDrift(def.sector, t)) / WPY + (dev1 - a.dev);
+          a.lp += def.beta * (dA + dN) + (def.alpha + sectorDrift(def.sector, t, W.week)) / WPY + (dev1 - a.dev);
           a.dev = dev1;
         }
         if (a.kind === 'etf') a.lp = Math.log(W.index * 10);
