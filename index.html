@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>증권왕</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#0b0f17">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- 시작 화면 -->
+  <section id="title-screen" class="title">
+    <header class="title-head">
+      <p class="eyebrow">대한민국 증시 70년 · 1956 – 2026</p>
+      <h1>증권왕</h1>
+      <p class="lede">입사할 해를 고르세요. 그해의 시장에서 종잣돈을 굴려 사원에서 증권왕까지 올라갑니다.</p>
+    </header>
+
+    <div class="dial">
+      <div class="dial-year"><span id="year-num">1997</span><small>년 입사</small></div>
+      <input id="year" type="range" min="1956" max="2026" step="1" value="1997" aria-label="입사 연도">
+      <div class="dial-ticks" aria-hidden="true"><span>1956</span><span>1980</span><span>2000</span><span>2026</span></div>
+      <div class="chips" id="year-presets">
+        <button type="button" data-y="1956">1956 개장</button>
+        <button type="button" data-y="1962">1962 파동</button>
+        <button type="button" data-y="1986">1986 3저</button>
+        <button type="button" data-y="1997">1997 IMF</button>
+        <button type="button" data-y="2009">2009 비트코인</button>
+        <button type="button" data-y="2020">2020 코로나</button>
+      </div>
+    </div>
+
+    <div class="era" id="era"></div>
+
+    <div class="start-row">
+      <label class="field"><span>이름</span><input id="player-name" type="text" maxlength="10" placeholder="신입" autocomplete="off"></label>
+      <button id="btn-start" class="primary" type="button">입사하기</button>
+    </div>
+    <button id="btn-continue" class="ghost" type="button" hidden></button>
+    <p class="fine">지수와 비트코인은 실제 흐름을 참고한 근사치이고, 상장 종목은 모두 가상의 회사입니다. 같은 해라도 판마다 시세가 다르게 움직입니다.</p>
+  </section>
+
+  <!-- 게임 화면 -->
+  <section id="game-screen" class="game" hidden>
+    <header class="hud">
+      <div class="hud-top">
+        <div class="hud-date"><b id="hud-date"></b><span id="hud-era"></span></div>
+        <div class="hud-index"><span>종합지수</span><b id="hud-index"></b><em id="hud-index-chg"></em></div>
+        <button id="btn-menu" class="icon-btn" type="button" aria-label="메뉴">≡</button>
+      </div>
+      <div class="hud-money">
+        <div><span>순자산</span><b id="hud-nw"></b></div>
+        <div><span>현금</span><b id="hud-cash"></b></div>
+        <div><span>직급</span><b id="hud-rank"></b></div>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button type="button" data-tab="market" class="on">시장</button>
+      <button type="button" data-tab="port">내 계좌</button>
+      <button type="button" data-tab="news">뉴스<i id="news-dot" hidden></i></button>
+    </nav>
+
+    <main class="pane" id="pane">
+      <div id="tab-market"><div class="list" id="market-list"></div></div>
+      <div id="tab-port" hidden></div>
+      <div id="tab-news" hidden></div>
+    </main>
+
+    <footer class="controls">
+      <button id="btn-play" class="primary" type="button">▶ 시작</button>
+      <div class="seg" id="speeds">
+        <button type="button" data-speed="1" class="on">1×</button>
+        <button type="button" data-speed="4">4×</button>
+        <button type="button" data-speed="16">16×</button>
+      </div>
+      <button id="btn-step" class="ghost" type="button">1주 ▸</button>
+    </footer>
+  </section>
+
+  <div id="sheet" class="overlay" hidden></div>
+  <div id="modal" class="overlay center" hidden></div>
+  <div id="toasts" aria-live="polite"></div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/world.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>

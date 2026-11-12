@@ -1,0 +1,12 @@
+{
+  "name": "증권왕",
+  "short_name": "증권왕",
+  "description": "1956년부터 2026년까지, 대한민국 증시에서 트레이더로 살아남는 게임",
+  "lang": "ko",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0e15",
+  "theme_color": "#0a0e15",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
