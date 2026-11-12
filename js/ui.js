@@ -30,6 +30,7 @@
   /* ---------- 상태 ---------- */
   let playing = false, speed = 1, timer = null, tab = 'market';
   let sheetId = null, sheetRange = 156, sheetMode = 'buy', sheetQty = '', sheetErr = '', resume = false;
+  let sSide = 'short';
   let cSide = 'sell', cDir = 'below', cBasis = 'price', cVal = '', cQty = '';
   let seenNews = 0;
   const DELAY = { 1: 900, 4: 225, 16: 56 };
@@ -48,6 +49,7 @@
       '<div><dt>종잣돈</dt><dd>' + SK.fmtMoney(cap, u) + '</dd></div>' +
       '<div><dt>종합지수</dt><dd>' + SK.fmtPx(SK.indexAnchor(t)) + '</dd></div>' +
       '<div><dt>상장 종목</dt><dd>' + listed + '개</dd></div>' +
+      '<div><dt>정년</dt><dd>' + Math.min(2026, y + SK.RETIRE_AGE - SK.START_AGE) + '년 · ' + (SK.START_AGE + Math.min(2026, y + SK.RETIRE_AGE - SK.START_AGE) - y) + '세</dd></div>' +
       '<div><dt>비트코인</dt><dd class="' + (y >= 2009 ? 'gold' : '') + '">' + btc + '</dd></div>' +
       '</dl>';
     document.querySelectorAll('#year-presets button').forEach((b) => b.classList.toggle('on', +b.dataset.y === y));
@@ -77,7 +79,7 @@
     const W = G.world, S = G.state;
     const d = SK.dateOf(W.week);
     $('#hud-date').textContent = fmtDate(W.week);
-    $('#hud-era').textContent = eraOf(d.getUTCFullYear()).name;
+    $('#hud-era').textContent = G.age() + '세 · ' + eraOf(d.getUTCFullYear()).name;
     $('#hud-index').textContent = SK.fmtPx(W.index);
     const h = W.idxHist, r = h.length > 1 ? h[h.length - 1] / h[h.length - 2] - 1 : 0;
     const chg = $('#hud-index-chg');
@@ -109,15 +111,15 @@
         '<span class="row-num"><span class="row-price"></span><span class="row-chg"></span></span></button>').join('');
     }
     assets.forEach((a, i) => {
-      const el = box.children[i], h = G.state.holdings[a.id];
+      const el = box.children[i], h = port === 'short' ? G.state.shorts[a.id] : G.state.holdings[a.id];
       const sub = el.querySelector('.row-sub'), price = el.querySelector('.row-price'), chg = el.querySelector('.row-chg');
       const half = a.hist.length > 26 ? a.price / a.hist[a.hist.length - 27] - 1 : a.price / a.hist[0] - 1;
       const sp = el.querySelector('.spark');
       sp.setAttribute('class', 'spark ' + cls(half));
       sp.firstChild.setAttribute('points', spark(a, 27));
       if (port) {
-        const pnl = a.price / h.avg - 1;
-        sub.textContent = SK.fmtQty(h.qty, a) + ' · 평단 ' + SK.fmtPx(h.avg);
+        const pnl = port === 'short' ? 1 - a.price / h.avg : a.price / h.avg - 1;
+        sub.textContent = SK.fmtQty(h.qty, a) + (port === 'short' ? ' · 매도가 ' : ' · 평단 ') + SK.fmtPx(h.avg);
         price.textContent = SK.fmtMoney(h.qty * a.price);
         chg.textContent = fmtPct(pnl);
         chg.className = 'row-chg ' + cls(pnl);
@@ -182,7 +184,7 @@
         '<button type="button" class="row" data-bank="dep"><span class="row-main"><span class="row-name">예금</span><span class="row-sub" id="bk-dep-sub"></span></span><span></span><span class="row-num"><span class="row-price" id="bk-dep"></span><span class="row-chg">입금·출금</span></span></button>' +
         '<button type="button" class="row" data-bank="loan"><span class="row-main"><span class="row-name">신용 융자</span><span class="row-sub" id="bk-loan-sub"></span></span><span></span><span class="row-num"><span class="row-price" id="bk-loan"></span><span class="row-chg">빌리기·갚기</span></span></button></div>' +
         '<h3 class="section-h">보유 종목</h3><div class="list" id="pf-list"></div><p class="empty" id="pf-empty">아직 보유한 종목이 없습니다. 시장 탭에서 종목을 눌러 매수하세요.</p>' +
-        '<h3 class="section-h" id="pf-orders-h">조건 주문</h3><div id="pf-orders"></div><h3 class="section-h">기록</h3><ul class="log" id="pf-log"></ul>';
+        '<h3 class="section-h" id="pf-short-h">공매도</h3><div class="list" id="pf-short"></div><h3 class="section-h" id="pf-orders-h">조건 주문</h3><div id="pf-orders"></div><h3 class="section-h">기록</h3><ul class="log" id="pf-log"></ul>';
       $('#pf-list').dataset.key = '';
     }
     const nw = G.netWorth(), ret = nw / S.startCap - 1, hv = G.holdingValue();
@@ -195,7 +197,7 @@
       '<div><dt>입사 후 자산</dt><dd class="' + cls(ret) + '">' + fmtPct(ret) + '</dd></div>' +
       '<div><dt>같은 기간 지수</dt><dd class="' + cls(W.index / S.startIndex - 1) + '">' + fmtPct(W.index / S.startIndex - 1) + '</dd></div>' +
       '<div><dt>월 저축</dt><dd>' + SK.fmtMoney(G.salary()) + '</dd></div>' +
-      (S.loan > 0 ? '<div><dt>담보비율</dt><dd class="' + (G.marginRatio() < 1.6 ? 'up' : '') + '">' + Math.round(G.marginRatio() * 100) + '%</dd></div>' : '');
+      (G.liab() > 0 ? '<div><dt>담보비율</dt><dd class="' + (G.marginRatio() < 1.6 ? 'up' : '') + '">' + Math.round(G.marginRatio() * 100) + '%</dd></div>' : '');
     $('#bk-dep').textContent = SK.fmtMoney(S.deposit);
     $('#bk-dep-sub').textContent = '연 ' + pct1(G.rate()) + ' · 언제든 입출금';
     $('#bk-loan').textContent = SK.fmtMoney(S.loan);
@@ -211,6 +213,9 @@
     const held = W.assets.filter((a) => S.holdings[a.id]);
     syncList($('#pf-list'), held, true);
     $('#pf-empty').hidden = held.length > 0;
+    const sh = W.assets.filter((a) => S.shorts[a.id]);
+    syncList($('#pf-short'), sh, 'short');
+    $('#pf-short-h').hidden = !sh.length;
     const oh = ordersHtml(S.orders), ob = $('#pf-orders');
     if (ob.dataset.h !== oh) { ob.dataset.h = oh; ob.innerHTML = oh; }
     $('#pf-orders-h').hidden = !S.orders.length;
@@ -308,6 +313,11 @@
   function sheetSummary() {
     const a = G.world.byId[sheetId], q = parseFloat(sheetQty) || 0, amt = q * a.price;
     if (sheetErr) return '<span class="err">' + esc(sheetErr) + '</span>';
+    if (sheetMode === 'short') {
+      const s = G.state.shorts[a.id], block = G.shortBlock(a.id);
+      if (sSide === 'short') return block ? '<span class="err">' + block + '</span>' : q ? '<b>' + SK.fmtMoney(amt * (1 - G.FEE.sell)) + '</b> 입금. 주가가 오르면 손실이고, 빌린 값으로 연 3% 수수료를 냅니다' : '최대 ' + SK.fmtQty(G.maxShort(a.id), a) + ' 공매도 가능';
+      return q ? '결제 <b>' + SK.fmtMoney(amt * (1 + G.FEE.buy)) + '</b>' + (s ? ' · 예상 손익 ' + SK.fmtMoney((s.avg - a.price) * Math.min(q, s.qty)) : '') : '공매도 잔량 ' + SK.fmtQty(s ? s.qty : 0, a);
+    }
     if (sheetMode === 'cond') {
       const v = parseFloat(cVal) || 0, cq = parseFloat(cQty) || 0, h = G.state.holdings[a.id];
       if (!v || !cq) return cBasis === 'avg' ? (h ? '평단 ' + SK.fmtPx(h.avg) + unit() + ' 기준으로 몇 % 움직이면 주문할지 정합니다' : '평단 기준은 보유 중인 종목에만 걸 수 있습니다') : '현재가 ' + SK.fmtPx(a.price) + unit() + '. 기준 가격과 수량을 입력하세요';
@@ -327,14 +337,15 @@
   const ordersHtml = (list) => (list.length ? '<ul class="orders">' + list.map((o) => '<li><span>' + esc(SK.orderText(o)) + '</span><button type="button" data-cancel="' + o.id + '">취소</button></li>').join('') + '</ul>' : '');
 
   function renderSheet() {
-    const a = G.world.byId[sheetId], h = G.state.holdings[a.id], box = $('#sheet');
+    const a = G.world.byId[sheetId], h = G.state.holdings[a.id], st = G.state.shorts[a.id], box = $('#sheet');
+    const dy = SK.divYield(a.def, G.world.t);
     const n = sheetRange ? Math.min(sheetRange + 1, a.hist.length) : a.hist.length;
     const data = a.hist.slice(-n), r = data.length > 1 ? data[data.length - 1] / data[0] - 1 : 0;
     const ranges = [[26, '6개월'], [156, '3년'], [520, '10년'], [0, '전체']];
     const closed = a.dead;
     box.innerHTML =
       '<div class="card" role="dialog" aria-label="' + esc(a.def.name) + '">' +
-      '<div class="card-head"><div><h2>' + esc(a.def.name) + '</h2><p class="sub">' + esc(a.def.sector) + ' · ' + esc(a.def.desc) + '</p></div>' +
+      '<div class="card-head"><div><h2>' + esc(a.def.name) + '</h2><p class="sub">' + esc(a.def.sector) + ' · ' + esc(a.def.desc) + (dy > 0 ? ' 배당 연 ' + pct1(dy) + ' (4월 지급).' : a.kind === 'crypto' ? '' : ' 배당 없음.') + '</p></div>' +
       '<button type="button" class="icon-btn" data-act="close" aria-label="닫기">×</button></div>' +
       (briefHtml(a.def.sector) ? '<div class="sec-brief">' + briefHtml(a.def.sector) + '</div>' : '') +
       '<div class="px"><b>' + SK.fmtPx(a.price) + '</b><span>' + unit() + '</span><span class="' + cls(r) + '">' + fmtPct(r) + ' (' + ranges.find((x) => x[0] === sheetRange)[1] + ')</span></div>' +
@@ -342,18 +353,20 @@
       '<canvas class="chart" id="sp-chart"></canvas>' +
       (h ? '<dl class="kv"><div><dt>보유</dt><dd>' + SK.fmtQty(h.qty, a) + '</dd></div><div><dt>평균 단가</dt><dd>' + SK.fmtPx(h.avg) + '</dd></div><div><dt>평가 손익</dt><dd class="' + cls(a.price - h.avg) + '">' +
         (a.price >= h.avg ? '+' : '') + SK.fmtMoney((a.price - h.avg) * h.qty) + ' (' + fmtPct(a.price / h.avg - 1) + ')</dd></div></dl>' : '') +
+      (st ? '<dl class="kv"><div><dt>공매도</dt><dd>' + SK.fmtQty(st.qty, a) + '</dd></div><div><dt>평균 매도가</dt><dd>' + SK.fmtPx(st.avg) + '</dd></div><div><dt>평가 손익</dt><dd class="' + cls(st.avg - a.price) + '">' +
+        (st.avg >= a.price ? '+' : '') + SK.fmtMoney((st.avg - a.price) * st.qty) + '</dd></div></dl>' : '') +
       (closed ? '<p class="sub">거래가 끝난 종목입니다.</p>' :
-        '<div class="trade"><div class="seg">' + [['buy', '매수'], ['sell', '매도'], ['cond', '조건 주문']].map(([m, l]) => '<button type="button" data-mode="' + m + '" class="' + (sheetMode === m ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
+        '<div class="trade"><div class="seg">' + [['buy', '매수'], ['sell', '매도'], ['cond', '조건'], ['short', '공매도']].map(([m, l]) => '<button type="button" data-mode="' + m + '" class="' + (sheetMode === m ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
         (sheetMode === 'cond'
           ? chipRow('cside', cSide, [['sell', '조건 매도'], ['buy', '조건 매수']]) +
             chipRow('cdir', cDir, [['below', '이하로 떨어지면'], ['above', '이상으로 오르면']]) +
             chipRow('cbasis', cBasis, [['price', '가격 기준'], ['avg', '평단 기준 %']]) +
             '<label class="qty"><input id="sp-cval" type="text" inputmode="decimal" placeholder="' + (cBasis === 'price' ? '기준 가격' : '평단 대비') + '" autocomplete="off" value="' + esc(cVal) + '"><span>' + (cBasis === 'price' ? unit() : (cDir === 'below' ? '% 하락' : '% 상승')) + '</span></label>' +
             '<label class="qty"><input id="sp-cqty" type="text" inputmode="decimal" placeholder="수량" autocomplete="off" value="' + esc(cQty) + '"><span>' + (a.kind === 'crypto' ? 'BTC' : '주') + '</span></label>'
-          : '<label class="qty"><input id="sp-qty" type="text" inputmode="decimal" placeholder="수량" autocomplete="off" value="' + esc(sheetQty) + '"><span>' + (a.kind === 'crypto' ? 'BTC' : '주') + '</span></label>') +
+          : (sheetMode === 'short' ? chipRow('sside', sSide, [['short', '공매도'], ['cover', '환매수']]) : '') + '<label class="qty"><input id="sp-qty" type="text" inputmode="decimal" placeholder="수량" autocomplete="off" value="' + esc(sheetQty) + '"><span>' + (a.kind === 'crypto' ? 'BTC' : '주') + '</span></label>') +
         '<div class="chips">' + [[0.1, '10%'], [0.25, '25%'], [0.5, '50%'], [1, '최대']].map(([v, l]) => '<button type="button" data-pct="' + v + '">' + l + '</button>').join('') + '</div>' +
         '<p class="sum" id="sp-sum">' + sheetSummary() + '</p>' +
-        '<div class="card-foot"><button type="button" class="ghost" data-act="step">1주 진행 ▸</button><button type="button" class="primary ' + (sheetMode === 'cond' ? '' : sheetMode) + '" data-act="go">' + { buy: '매수', sell: '매도', cond: '조건 주문 등록' }[sheetMode] + '</button></div>' +
+        '<div class="card-foot"><button type="button" class="ghost" data-act="step">1주 진행 ▸</button><button type="button" class="primary ' + { buy: 'buy', sell: 'sell', cond: '', short: sSide === 'short' ? 'sell' : 'buy' }[sheetMode] + '" data-act="go">' + { buy: '매수', sell: '매도', cond: '조건 주문 등록', short: sSide === 'short' ? '공매도' : '환매수' }[sheetMode] + '</button></div>' +
         ordersHtml(G.state.orders.filter((o) => o.asset === a.id)) + '</div>') +
       '</div>';
     drawChart($('#sp-chart'), data, a.listWeek + a.hist.length - data.length, h ? h.avg : null);
@@ -368,18 +381,23 @@
     if (b.dataset.act === 'close') return closeSheet();
     if (b.dataset.range !== undefined) sheetRange = +b.dataset.range;
     else if (b.dataset.mode) { sheetMode = b.dataset.mode; sheetQty = ''; }
+    else if (b.dataset.sside) { sSide = b.dataset.sside; sheetQty = ''; }
     else if (b.dataset.cside) { cSide = b.dataset.cside; cDir = cSide === 'sell' ? 'below' : 'above'; cQty = ''; }
     else if (b.dataset.cdir) cDir = b.dataset.cdir;
     else if (b.dataset.cbasis) { cBasis = b.dataset.cbasis; cVal = ''; }
     else if (b.dataset.cancel) G.cancelOrder(+b.dataset.cancel);
     else if (b.dataset.pct) {
       const side = sheetMode === 'cond' ? cSide : sheetMode;
-      const max = side === 'buy' ? G.maxBuy(a.id) : G.maxSell(a.id), q = max * +b.dataset.pct;
+      const max = sheetMode === 'short' ? (sSide === 'short' ? G.maxShort(a.id) : G.maxCover(a.id)) : side === 'buy' ? G.maxBuy(a.id) : G.maxSell(a.id), q = max * +b.dataset.pct;
       const s = String(a.kind === 'crypto' ? Math.floor(q * 1e4) / 1e4 : Math.floor(q));
       if (sheetMode === 'cond') cQty = s; else sheetQty = s;
     } else if (b.dataset.act === 'go' && sheetMode === 'cond') {
       sheetErr = G.addOrder({ asset: a.id, side: cSide, dir: cDir, basis: cBasis, value: parseFloat(cVal) || 0, qty: parseFloat(cQty) || 0 }) || '';
       if (!sheetErr) { toast('조건 주문을 등록했습니다'); cVal = ''; cQty = ''; }
+    } else if (b.dataset.act === 'go' && sheetMode === 'short') {
+      const q = Math.floor(parseFloat(sheetQty) || 0);
+      sheetErr = (sSide === 'short' ? G.short(a.id, q) : G.cover(a.id, q)) || '';
+      if (!sheetErr) { toast((sSide === 'short' ? '공매도 체결: ' : '환매수 체결: ') + a.def.name + ' ' + SK.fmtQty(q, a)); sheetQty = ''; renderHud(); }
     } else if (b.dataset.act === 'go') {
       const q = parseFloat(sheetQty) || 0;
       sheetErr = (sheetMode === 'buy' ? G.buy(a.id, q) : G.sell(a.id, q)) || '';
@@ -413,7 +431,7 @@
     openModal(
       '<div class="card-head"><div><h2>메뉴</h2><p class="sub">' + esc(G.state.name) + ' · ' + SK.RANKS[G.state.rank].name + '</p></div><button type="button" class="icon-btn" data-m="close" aria-label="닫기">×</button></div>' +
       '<label class="check"><input type="checkbox" id="opt-pause" ' + (G.state.autoPause ? 'checked' : '') + '>속보가 뜨면 시간 멈추기</label>' +
-      '<ul class="help"><li>한 번에 한 주씩 흐릅니다. 종목을 누르면 시간이 멈추고 매매 창이 열립니다.</li><li>매달 직급에 맞는 저축액이 현금으로 들어옵니다.</li><li>순자산이 늘면 승진합니다. 2026년 가치로 1000억 원이면 증권왕입니다.</li><li>내 계좌의 예금은 그 시절 금리로 이자가 붙습니다. 신용 융자는 총자산이 융자금의 2배 이상일 때 빌릴 수 있고, 140% 아래로 내려가면 반대매매됩니다.</li><li>시장 탭은 업종별로 묶여 있습니다. 업종 이름을 누르면 종목이 펼쳐지고, 그 아래에 지금의 호재와 악재가 요약됩니다.</li><li>호재와 악재가 모두 맞지는 않습니다. 헛소문도 있고, 이미 주가에 반영됐거나 거꾸로 가는 재료도 있습니다.</li><li>종목 창의 조건 주문으로 손절·익절·추격 매수를 미리 걸 수 있습니다. 가격 또는 평단 대비 %로 기준을 정합니다.</li><li>부도난 회사의 주식은 거의 전부 잃습니다. 뉴스를 확인하세요.</li><li>게임은 2026년 11월에 끝납니다. 진행 상황은 이 기기에 자동 저장됩니다.</li></ul>' +
+      '<ul class="help"><li>한 번에 한 주씩 흐릅니다. 종목을 누르면 시간이 멈추고 매매 창이 열립니다.</li><li>매달 직급에 맞는 저축액이 현금으로 들어옵니다.</li><li>순자산이 늘면 승진합니다. 2026년 가치로 1000억 원이면 증권왕입니다.</li><li>내 계좌의 예금은 그 시절 금리로 이자가 붙습니다. 신용 융자는 총자산이 융자금의 2배 이상일 때 빌릴 수 있고, 140% 아래로 내려가면 반대매매됩니다.</li><li>시장 탭은 업종별로 묶여 있습니다. 업종 이름을 누르면 종목이 펼쳐지고, 그 아래에 지금의 호재와 악재가 요약됩니다.</li><li>호재와 악재가 모두 맞지는 않습니다. 헛소문도 있고, 이미 주가에 반영됐거나 거꾸로 가는 재료도 있습니다.</li><li>종목 창의 조건 주문으로 손절·익절·추격 매수를 미리 걸 수 있습니다. 가격 또는 평단 대비 %로 기준을 정합니다.</li><li>주식은 매년 4월 첫 주에 배당을 줍니다. 배당만큼 주가가 내려가고(배당락), 세금 15.4%를 뗍니다.</li><li>공매도는 내릴 것 같은 주식을 빌려서 먼저 파는 거래입니다. 주가가 오르면 손실이고 담보비율 규칙은 신용 융자와 같습니다. 금지된 시기에는 새로 걸 수 없습니다.</li><li>부도난 회사의 주식은 거의 전부 잃습니다. 뉴스를 확인하세요.</li><li>24세에 입사해 65세 정년 또는 2026년 11월 중 먼저 오는 때에 끝납니다. 진행 상황은 이 기기에 자동 저장됩니다.</li></ul>' +
       (confirming
         ? '<p class="err">지금 판을 버리고 처음으로 돌아갑니다.</p><div class="card-foot"><button type="button" class="ghost" data-m="close">계속하기</button><button type="button" class="primary" data-m="quit">버리고 나가기</button></div>'
         : '<div class="card-foot"><button type="button" class="ghost" data-m="ask-quit">새 게임</button><button type="button" class="primary" data-m="close">계속하기</button></div>'));
@@ -428,7 +446,7 @@
     const king = S.rank === SK.RANKS.length - 1;
     openModal(
       '<p class="label">' + fmtDate(S.startWeek) + ' – ' + fmtDate(W.week) + ' · ' + years.toFixed(1) + '년</p>' +
-      '<p class="crown">' + (S.bust ? '깡통 계좌로 퇴사' : king ? '1000억 달성, 증권왕 등극' : SK.RANKS[S.rank].name + '으로 은퇴') + '</p>' +
+      '<p class="crown">' + (S.bust ? '깡통 계좌로 퇴사' : king ? '1000억 달성, 증권왕 등극' : G.age() + '세, ' + SK.RANKS[S.rank].name + '으로 은퇴') + '</p>' +
       '<div><div class="label">최종 순자산</div><div class="result">' + SK.fmtMoney(nw) + '</div></div>' +
       '<dl class="kv"><div><dt>자산 배수</dt><dd>' + (mult >= 100 ? comma(mult) : mult.toFixed(1)) + '배</dd></div><div><dt>같은 기간 지수</dt><dd>' + (idx >= 100 ? comma(idx) : idx.toFixed(1)) + '배</dd></div>' +
       '<div><dt>2026년 가치</dt><dd>' + SK.fmtMoney(G.realWorth(), '원') + '</dd></div></dl>' +
@@ -450,11 +468,11 @@
     const modes = dep ? [['in', '입금'], ['out', '출금']] : [['borrow', '빌리기'], ['repay', '갚기']];
     openModal(
       '<div class="card-head"><div><h2>' + (dep ? '예금' : '신용 융자') + '</h2><p class="sub">' +
-      (dep ? '그 시절 금리로 매주 이자가 붙습니다. 언제든 넣고 뺄 수 있습니다.' : '증권사에서 돈을 빌려 투자합니다. 담보비율(총자산 ÷ 융자금)이 140% 아래로 내려가면 강제로 정리됩니다.') +
+      (dep ? '그 시절 금리로 매주 이자가 붙습니다. 언제든 넣고 뺄 수 있습니다.' : '증권사에서 돈을 빌려 투자합니다. 담보비율(총자산 ÷ (융자금 + 공매도 평가액))이 140% 아래로 내려가면 강제로 정리됩니다.') +
       '</p></div><button type="button" class="icon-btn" data-m="close" aria-label="닫기">×</button></div>' +
       '<dl class="kv">' + (dep
         ? '<div><dt>예금 잔액</dt><dd>' + SK.fmtMoney(S.deposit) + '</dd></div><div><dt>금리</dt><dd>연 ' + pct1(G.rate()) + '</dd></div><div><dt>현금</dt><dd>' + SK.fmtMoney(S.cash) + '</dd></div>'
-        : '<div><dt>융자금</dt><dd>' + SK.fmtMoney(S.loan) + '</dd></div><div><dt>금리</dt><dd>연 ' + pct1(G.loanRate()) + '</dd></div><div><dt>담보비율</dt><dd>' + (S.loan > 0 ? Math.round(G.marginRatio() * 100) + '%' : '-') + '</dd></div><div><dt>빌릴 수 있는 돈</dt><dd>' + SK.fmtMoney(G.maxBorrow()) + '</dd></div>') + '</dl>' +
+        : '<div><dt>융자금</dt><dd>' + SK.fmtMoney(S.loan) + '</dd></div><div><dt>금리</dt><dd>연 ' + pct1(G.loanRate()) + '</dd></div><div><dt>담보비율</dt><dd>' + (G.liab() > 0 ? Math.round(G.marginRatio() * 100) + '%' : '-') + '</dd></div><div><dt>빌릴 수 있는 돈</dt><dd>' + SK.fmtMoney(G.maxBorrow()) + '</dd></div>') + '</dl>' +
       '<div class="trade"><div class="seg">' + modes.map(([m, l]) => '<button type="button" data-bmode="' + m + '" class="' + (m === bankMode ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
       '<label class="qty"><input id="bank-amt" type="text" inputmode="numeric" placeholder="금액" autocomplete="off" value="' + esc(bankAmt) + '"><span>' + unit() + '</span></label>' +
       '<div class="chips">' + [[0.1, '10%'], [0.25, '25%'], [0.5, '50%'], [1, '최대']].map(([v, l]) => '<button type="button" data-bpct="' + v + '">' + l + '</button>').join('') + '</div>' +

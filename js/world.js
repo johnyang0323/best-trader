@@ -30,6 +30,8 @@
   SK.indexAnchor = (t) => interp(SK.INDEX_ANCHORS, t, true);
 
   // 초기 비트코인은 개인 간 거래뿐이라 주당 살 수 있는 양에 한도가 있다
+  SK.divYield = (def, t) => (SK.DIV_YIELD[def.sector] || 0) * Math.min(3, Math.max(1, interp(SK.RATES, t, false) / 0.04));
+  SK.shortBanned = (t) => SK.SHORT_BANS.some(([a, b]) => t >= a && t < b);
   SK.btcCap = (t) => (t < 2010.5 ? 100 : t < 2011.5 ? 1000 : t < 2013.28 ? 10000 : Infinity);
 
   SK.roundPx = (p) => (p >= 100 ? Math.round(p) : p >= 10 ? Math.round(p * 10) / 10 : Math.max(0.01, Math.round(p * 100) / 100));
@@ -151,24 +153,36 @@
       W.idxHist.push(W.index);
       btcNoise = btcNoise * 0.9 + 0.07 * gauss();
 
+      // 배당은 1년에 한 번, 4월 첫 주에 지급된다
+      const divWeek = W.week > 0 && SK.dateOf(W.week).getUTCMonth() === 3 && SK.dateOf(W.week - 1).getUTCMonth() === 2;
       for (const a of W.assets) {
         const def = a.def;
+        let fresh = false, div = 0;
         const z = gauss(); // 상장 여부와 무관하게 뽑아 난수 순서를 고정한다
         if (a.dead) continue;
         if (!a.listed) {
           if (t < def.listT) continue;
           a.listed = true;
+          fresh = true;
           a.listWeek = W.week;
           if (a.kind === 'stock') a.lp = Math.log(def.p0);
           if (W.week > 0) news('신규 상장: ' + def.name, def.desc, a.kind === 'crypto');
         } else if (a.kind === 'stock') {
           const dev1 = a.dev * 0.996 + def.sigma * z;
-          a.lp += def.beta * (dA + dN) + (def.alpha + sectorDrift(def.sector, t, W.week)) / WPY + (dev1 - a.dev);
+          a.lp += def.beta * (dA + dN) + (def.alpha + SK.divYield(def, t) + sectorDrift(def.sector, t, W.week)) / WPY + (dev1 - a.dev);
           a.dev = dev1;
         }
         if (a.kind === 'etf') a.lp = Math.log(W.index * 10);
         if (a.kind === 'crypto') a.lp = Math.log(interp(SK.BTC_ANCHORS, t, true)) + btcNoise;
+        if (divWeek && !fresh) {
+          const y = SK.divYield(def, t);
+          if (y > 0) {
+            div = Math.exp(a.lp) * y;
+            if (a.kind === 'stock') a.lp += Math.log(1 - y); // 배당락
+          }
+        }
         a.price = SK.roundPx(Math.exp(a.lp));
+        if (div > 0) evts.push({ type: 'div', asset: a, amount: div });
 
         if (def.end && t >= def.end.t) {
           a.price = SK.roundPx(a.price * def.end.mult);

@@ -1,6 +1,6 @@
 /* 증권왕 — 플레이어 상태, 매매, 저장 */
 (function (SK) {
-  const KEY = 'jeunggwonwang.save.v3';
+  const KEY = 'jeunggwonwang.save.v4';
   const FEE = { buy: 0.001, sell: 0.003 }; // 매도에는 거래세 포함
   const G = { state: null, world: null, FEE };
 
@@ -24,12 +24,21 @@
     return v;
   };
   G.assets = () => G.state.cash + G.state.deposit + G.holdingValue();
-  G.netWorth = () => G.assets() - G.state.loan;
+  G.shortValue = () => {
+    let v = 0;
+    for (const id in G.state.shorts) v += G.state.shorts[id].qty * G.world.byId[id].price;
+    return v;
+  };
+  G.liab = () => G.state.loan + G.shortValue();
+  G.netWorth = () => G.assets() - G.liab();
+  G.age = () => SK.START_AGE + Math.floor((G.world.week - G.state.startWeek) / 52.18);
+  G.DIV_TAX = 0.154;
+  G.SHORT_FEE = 0.03; // 주식을 빌리는 연 수수료
   G.rate = () => SK.interp(SK.RATES, G.world.t, false);
   G.loanRate = () => G.rate() + 0.04;
-  G.marginRatio = () => (G.state.loan > 0 ? G.assets() / G.state.loan : Infinity);
+  G.marginRatio = () => (G.liab() > 0 ? G.assets() / G.liab() : Infinity);
   // 융자 직후 담보비율이 200% 이상이어야 한다
-  G.maxBorrow = () => Math.max(0, Math.floor(G.assets() - 2 * G.state.loan));
+  G.maxBorrow = () => Math.max(0, Math.floor(G.assets() - 2 * G.liab()));
   G.MARGIN_CALL = 1.4;
   G.realWorth = () => G.netWorth() / G.scale(); // 2026년 원화 가치
   G.salary = () => roundSig(SK.RANKS[G.state.rank].pay * G.scale(), 2);
@@ -47,9 +56,9 @@
     while (W.week < startWeek) W.step();
     const cap = G.startCapitalFor(year);
     G.state = {
-      v: 3, seed, name: name || '신입', startWeek, week: W.week, cash: cap, startCap: cap,
+      v: 4, seed, name: name || '신입', startWeek, week: W.week, cash: cap, startCap: cap,
       startIndex: W.index, holdings: {}, rank: 0, nwHist: [cap], log: [], autoPause: true,
-      orders: [], orderSeq: 0, deposit: 0, loan: 0, warned: false, bust: false, over: false, btcWeek: -1, btcBought: 0, month: SK.dateOf(W.week).getUTCMonth()
+      orders: [], orderSeq: 0, deposit: 0, loan: 0, shorts: {}, endWeek: Math.min(SK.END_WEEK, startWeek + Math.ceil((SK.RETIRE_AGE - SK.START_AGE) * 52.18)), warned: false, bust: false, over: false, btcWeek: -1, btcBought: 0, month: SK.dateOf(W.week).getUTCMonth()
     };
     log(year + '년, 증권사 입사. 종잣돈 ' + SK.fmtMoney(cap));
     G.save();
@@ -64,7 +73,7 @@
   G.peekSave = function () {
     try {
       const s = JSON.parse(localStorage.getItem(KEY));
-      return s && s.v === 3 ? s : null;
+      return s && s.v === 4 ? s : null;
     } catch (e) { return null; }
   };
   G.load = function () {
@@ -86,6 +95,9 @@
     const out = { news: [], notes: [], major: false };
     if (S.over) return out;
     const evts = W.step();
+    let divIn = 0, divOut = 0;
+    // 현금이 모자라면 융자금으로 넘긴다
+    const spend = (x) => { S.cash -= x; if (S.cash < 0) { S.loan -= S.cash; S.cash = 0; } };
     for (const e of evts) {
       if (e.type === 'news') {
         out.news.push(e.news);
@@ -98,8 +110,22 @@
         S.loan /= 10;
         for (const id in S.holdings) S.holdings[id].avg /= 10;
         for (const o of S.orders) if (o.basis === 'price') o.value /= 10;
+        for (const id in S.shorts) S.shorts[id].avg /= 10;
         log('화폐개혁: 보유 현금과 단가가 10분의 1 숫자로 바뀌었다');
+      } else if (e.type === 'div') {
+        const h = S.holdings[e.asset.id], s = S.shorts[e.asset.id];
+        if (h) divIn += h.qty * e.amount * (1 - G.DIV_TAX);
+        if (s) divOut += s.qty * e.amount; // 공매도 중이면 배당을 물어 준다
       } else if (e.type === 'end') {
+        const s = S.shorts[e.asset.id];
+        if (s) {
+          const gain = (s.avg - e.asset.price) * s.qty;
+          spend(s.qty * e.asset.price);
+          delete S.shorts[e.asset.id];
+          const note = e.asset.def.name + ' 공매도 ' + SK.fmtQty(s.qty, e.asset) + ' 정리, 손익 ' + (gain >= 0 ? '+' : '') + SK.fmtMoney(gain);
+          log(note);
+          out.notes.push(note);
+        }
         const h = S.holdings[e.asset.id];
         if (h) {
           const got = h.qty * e.asset.price;
@@ -111,6 +137,14 @@
         }
       }
     }
+    if (divIn > 0 || divOut > 0) {
+      S.cash += divIn;
+      spend(divOut);
+      const note = '배당금 ' + (divIn > 0 ? SK.fmtMoney(divIn) + ' 입금 (세금 15.4% 차감)' : '') + (divOut > 0 ? (divIn > 0 ? ', ' : '') + '공매도 배당 ' + SK.fmtMoney(divOut) + ' 지급' : '');
+      log(note);
+      out.notes.push(note);
+    }
+    spend((G.shortValue() * G.SHORT_FEE) / 52.18);
     S.deposit *= 1 + G.rate() / 52.18;
     if (S.loan > 0) S.loan *= 1 + G.loanRate() / 52.18;
     runOrders(out);
@@ -131,7 +165,7 @@
       out.major = true;
     }
     S.nwHist.push(G.netWorth());
-    if (W.week >= SK.END_WEEK) S.over = true;
+    if (W.week >= S.endWeek) S.over = true;
     if (S.over || W.week % 4 === 0) G.save();
     return out;
   };
@@ -161,7 +195,7 @@
   // 담보비율(총자산 ÷ 융자금)이 140% 아래로 내려가면 반대매매
   function marginCheck(out) {
     const S = G.state;
-    if (!(S.loan > 0)) { S.warned = false; return; }
+    if (!(G.liab() > 0)) { S.warned = false; return; }
     const ratio = G.marginRatio();
     if (ratio >= G.MARGIN_CALL) {
       if (ratio >= 1.6) S.warned = false;
@@ -172,6 +206,14 @@
       }
       return;
     }
+    // 공매도를 먼저 되사고, 남은 빚은 현금 → 예금 → 평가액 큰 종목 순으로 갚는다
+    for (const id of Object.keys(S.shorts)) {
+      const a = G.world.byId[id], s = S.shorts[id];
+      S.cash -= s.qty * a.price * (1 + FEE.buy);
+      log('강제 환매수 ' + a.def.name + ' ' + SK.fmtQty(s.qty, a) + ' @ ' + SK.fmtPx(a.price));
+      delete S.shorts[id];
+    }
+    if (S.cash < 0) { S.loan -= S.cash; S.cash = 0; }
     const pay = (from) => { const x = Math.min(S[from], S.loan); S[from] -= x; S.loan -= x; };
     pay('cash');
     pay('deposit');
@@ -186,7 +228,7 @@
     if (S.loan >= 1) {
       S.bust = true;
       S.over = true;
-      note = '깡통 계좌: 가진 것을 모두 팔고도 융자금을 갚지 못했습니다';
+      note = '깡통 계좌: 가진 것을 모두 팔고도 빚을 갚지 못했습니다';
     } else {
       S.loan = 0;
       note = '반대매매: 담보비율이 140% 아래로 내려가 자산이 강제로 정리됐습니다';
@@ -196,6 +238,49 @@
     out.notes.push(note);
     out.major = true;
   }
+
+  /* 공매도: 주식을 빌려 판 뒤 나중에 되사서 갚는다. 판 돈은 현금으로 들어오고, 되살 금액이 빚으로 잡힌다. */
+  G.shortBlock = function (id) {
+    const a = G.world.byId[id];
+    if (a.kind === 'crypto') return '비트코인은 공매도할 수 없습니다';
+    if (SK.shortBanned(G.world.t)) return '지금은 공매도가 금지된 기간입니다';
+    return null;
+  };
+  G.maxShort = (id) => (G.shortBlock(id) ? 0 : Math.max(0, Math.floor((G.assets() - 2 * G.liab()) / (G.world.byId[id].price * (1 + FEE.sell)))));
+  G.maxCover = (id) => {
+    const s = G.state.shorts[id];
+    return s ? Math.min(s.qty, Math.floor(G.state.cash / (G.world.byId[id].price * (1 + FEE.buy)))) : 0;
+  };
+  G.short = function (id, qty) {
+    const S = G.state, a = G.world.byId[id];
+    qty = Math.floor(qty);
+    if (!(qty > 0)) return '수량을 입력하세요';
+    if (!a.listed || a.dead) return '거래할 수 없는 종목입니다';
+    const block = G.shortBlock(id);
+    if (block) return block;
+    if (qty > G.maxShort(id)) return '담보가 부족합니다 (공매도 후 담보비율 200% 이상 필요)';
+    S.cash += qty * a.price * (1 - FEE.sell);
+    const s = S.shorts[id] || (S.shorts[id] = { qty: 0, avg: 0 });
+    s.avg = (s.avg * s.qty + a.price * qty) / (s.qty + qty);
+    s.qty += qty;
+    log('공매도 ' + a.def.name + ' ' + SK.fmtQty(qty, a) + ' @ ' + SK.fmtPx(a.price));
+    G.save();
+    return null;
+  };
+  G.cover = function (id, qty) {
+    const S = G.state, a = G.world.byId[id], s = S.shorts[id];
+    qty = Math.floor(qty);
+    if (!(qty > 0)) return '수량을 입력하세요';
+    if (!s || qty > s.qty) return '공매도 수량이 부족합니다';
+    if (qty > G.maxCover(id)) return '현금이 부족합니다';
+    S.cash -= qty * a.price * (1 + FEE.buy);
+    const pnl = (s.avg - a.price) * qty;
+    s.qty -= qty;
+    if (s.qty <= 0) delete S.shorts[id];
+    log('환매수 ' + a.def.name + ' ' + SK.fmtQty(qty, a) + ' @ ' + SK.fmtPx(a.price) + ' (손익 ' + (pnl >= 0 ? '+' : '') + SK.fmtMoney(pnl) + ')');
+    G.save();
+    return null;
+  };
 
   /* 조건 주문: 가격이 기준에 닿은 주에 그 주 가격으로 체결된다.
    * { id, asset, side: buy|sell, dir: below|above, basis: price|avg, value: 가격 또는 평단 대비 %, qty } */
