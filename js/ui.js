@@ -22,6 +22,7 @@
   SK.fmtQty = (q, a) => (a.kind === 'crypto' ? (+q.toFixed(4)).toLocaleString('en-US', { maximumFractionDigits: 4 }) + ' BTC' : comma(q) + '주');
   const fmtPct = (r) => (r >= 0 ? '+' : '') + (Math.abs(r) >= 10 ? comma(r * 100) : (r * 100).toFixed(Math.abs(r) >= 1 ? 0 : 1)) + '%';
   const fmtDate = (w) => { const d = SK.dateOf(w); return d.getUTCFullYear() + '.' + String(d.getUTCMonth() + 1).padStart(2, '0') + '.' + String(d.getUTCDate()).padStart(2, '0'); };
+  const pct1 = (r) => (r * 100).toFixed(1) + '%';
   const cls = (r) => (r > 0 ? 'up' : r < 0 ? 'down' : '');
   const eraOf = (y) => SK.ERAS.find((e) => y >= e.from && y <= e.to) || SK.ERAS[SK.ERAS.length - 1];
   const weekChg = (a) => { const h = a.hist, n = h.length; return n > 1 ? h[n - 1] / h[n - 2] - 1 : 0; };
@@ -177,6 +178,9 @@
         '<div class="acct"><div><div class="label">순자산</div><div class="acct-big" id="pf-nw"></div></div>' +
         '<dl class="kv" id="pf-kv"></dl><div class="ladder" id="pf-ladder"></div>' +
         '<canvas class="chart" id="pf-chart"></canvas></div>' +
+        '<h3 class="section-h">예금·신용</h3><div class="list">' +
+        '<button type="button" class="row" data-bank="dep"><span class="row-main"><span class="row-name">예금</span><span class="row-sub" id="bk-dep-sub"></span></span><span></span><span class="row-num"><span class="row-price" id="bk-dep"></span><span class="row-chg">입금·출금</span></span></button>' +
+        '<button type="button" class="row" data-bank="loan"><span class="row-main"><span class="row-name">신용 융자</span><span class="row-sub" id="bk-loan-sub"></span></span><span></span><span class="row-num"><span class="row-price" id="bk-loan"></span><span class="row-chg">빌리기·갚기</span></span></button></div>' +
         '<h3 class="section-h">보유 종목</h3><div class="list" id="pf-list"></div><p class="empty" id="pf-empty">아직 보유한 종목이 없습니다. 시장 탭에서 종목을 눌러 매수하세요.</p>' +
         '<h3 class="section-h" id="pf-orders-h">조건 주문</h3><div id="pf-orders"></div><h3 class="section-h">기록</h3><ul class="log" id="pf-log"></ul>';
       $('#pf-list').dataset.key = '';
@@ -190,7 +194,12 @@
       '<div><dt>평가 손익</dt><dd class="' + cls(hv - cost) + '">' + (hv - cost >= 0 ? '+' : '') + SK.fmtMoney(hv - cost) + '</dd></div>' +
       '<div><dt>입사 후 자산</dt><dd class="' + cls(ret) + '">' + fmtPct(ret) + '</dd></div>' +
       '<div><dt>같은 기간 지수</dt><dd class="' + cls(W.index / S.startIndex - 1) + '">' + fmtPct(W.index / S.startIndex - 1) + '</dd></div>' +
-      '<div><dt>월 저축</dt><dd>' + SK.fmtMoney(G.salary()) + '</dd></div>';
+      '<div><dt>월 저축</dt><dd>' + SK.fmtMoney(G.salary()) + '</dd></div>' +
+      (S.loan > 0 ? '<div><dt>담보비율</dt><dd class="' + (G.marginRatio() < 1.6 ? 'up' : '') + '">' + Math.round(G.marginRatio() * 100) + '%</dd></div>' : '');
+    $('#bk-dep').textContent = SK.fmtMoney(S.deposit);
+    $('#bk-dep-sub').textContent = '연 ' + pct1(G.rate()) + ' · 언제든 입출금';
+    $('#bk-loan').textContent = SK.fmtMoney(S.loan);
+    $('#bk-loan-sub').textContent = '연 ' + pct1(G.loanRate()) + ' · 한도 ' + SK.fmtMoney(G.maxBorrow());
     const next = SK.RANKS[S.rank + 1];
     if (next) {
       const need = next.min * G.scale(), cur = SK.RANKS[S.rank].min * G.scale();
@@ -404,7 +413,7 @@
     openModal(
       '<div class="card-head"><div><h2>메뉴</h2><p class="sub">' + esc(G.state.name) + ' · ' + SK.RANKS[G.state.rank].name + '</p></div><button type="button" class="icon-btn" data-m="close" aria-label="닫기">×</button></div>' +
       '<label class="check"><input type="checkbox" id="opt-pause" ' + (G.state.autoPause ? 'checked' : '') + '>속보가 뜨면 시간 멈추기</label>' +
-      '<ul class="help"><li>한 번에 한 주씩 흐릅니다. 종목을 누르면 시간이 멈추고 매매 창이 열립니다.</li><li>매달 직급에 맞는 저축액이 현금으로 들어옵니다.</li><li>순자산이 늘면 승진합니다. 2026년 가치로 1조 원이면 증권왕입니다.</li><li>시장 탭은 업종별로 묶여 있습니다. 업종 이름을 누르면 종목이 펼쳐지고, 그 아래에 지금의 호재와 악재가 요약됩니다.</li><li>호재와 악재가 모두 맞지는 않습니다. 헛소문도 있고, 이미 주가에 반영됐거나 거꾸로 가는 재료도 있습니다.</li><li>종목 창의 조건 주문으로 손절·익절·추격 매수를 미리 걸 수 있습니다. 가격 또는 평단 대비 %로 기준을 정합니다.</li><li>부도난 회사의 주식은 거의 전부 잃습니다. 뉴스를 확인하세요.</li><li>게임은 2026년 11월에 끝납니다. 진행 상황은 이 기기에 자동 저장됩니다.</li></ul>' +
+      '<ul class="help"><li>한 번에 한 주씩 흐릅니다. 종목을 누르면 시간이 멈추고 매매 창이 열립니다.</li><li>매달 직급에 맞는 저축액이 현금으로 들어옵니다.</li><li>순자산이 늘면 승진합니다. 2026년 가치로 1000억 원이면 증권왕입니다.</li><li>내 계좌의 예금은 그 시절 금리로 이자가 붙습니다. 신용 융자는 총자산이 융자금의 2배 이상일 때 빌릴 수 있고, 140% 아래로 내려가면 반대매매됩니다.</li><li>시장 탭은 업종별로 묶여 있습니다. 업종 이름을 누르면 종목이 펼쳐지고, 그 아래에 지금의 호재와 악재가 요약됩니다.</li><li>호재와 악재가 모두 맞지는 않습니다. 헛소문도 있고, 이미 주가에 반영됐거나 거꾸로 가는 재료도 있습니다.</li><li>종목 창의 조건 주문으로 손절·익절·추격 매수를 미리 걸 수 있습니다. 가격 또는 평단 대비 %로 기준을 정합니다.</li><li>부도난 회사의 주식은 거의 전부 잃습니다. 뉴스를 확인하세요.</li><li>게임은 2026년 11월에 끝납니다. 진행 상황은 이 기기에 자동 저장됩니다.</li></ul>' +
       (confirming
         ? '<p class="err">지금 판을 버리고 처음으로 돌아갑니다.</p><div class="card-foot"><button type="button" class="ghost" data-m="close">계속하기</button><button type="button" class="primary" data-m="quit">버리고 나가기</button></div>'
         : '<div class="card-foot"><button type="button" class="ghost" data-m="ask-quit">새 게임</button><button type="button" class="primary" data-m="close">계속하기</button></div>'));
@@ -419,18 +428,63 @@
     const king = S.rank === SK.RANKS.length - 1;
     openModal(
       '<p class="label">' + fmtDate(S.startWeek) + ' – ' + fmtDate(W.week) + ' · ' + years.toFixed(1) + '년</p>' +
-      '<p class="crown">' + (king ? '증권왕 등극' : SK.RANKS[S.rank].name + '으로 은퇴') + '</p>' +
+      '<p class="crown">' + (S.bust ? '깡통 계좌로 퇴사' : king ? '1000억 달성, 증권왕 등극' : SK.RANKS[S.rank].name + '으로 은퇴') + '</p>' +
       '<div><div class="label">최종 순자산</div><div class="result">' + SK.fmtMoney(nw) + '</div></div>' +
       '<dl class="kv"><div><dt>자산 배수</dt><dd>' + (mult >= 100 ? comma(mult) : mult.toFixed(1)) + '배</dd></div><div><dt>같은 기간 지수</dt><dd>' + (idx >= 100 ? comma(idx) : idx.toFixed(1)) + '배</dd></div>' +
       '<div><dt>2026년 가치</dt><dd>' + SK.fmtMoney(G.realWorth(), '원') + '</dd></div></dl>' +
-      '<p class="sub">' + (mult > idx ? '지수를 이겼습니다.' : '지수를 이기지 못했습니다. 다른 해에 다시 도전해 보세요.') + '</p>' +
+      '<p class="sub">' + (S.bust ? '빚으로 산 주식이 무너졌습니다. 신용은 양날의 칼입니다.' : mult > idx ? '지수를 이겼습니다.' : '지수를 이기지 못했습니다. 다른 해에 다시 도전해 보세요.') + '</p>' +
       '<div class="card-foot"><button type="button" class="ghost" data-m="close">계좌 보기</button><button type="button" class="primary" data-m="quit">새 게임</button></div>');
   }
 
+  /* ---------- 예금·신용 창 ---------- */
+  let bankKind = 'dep', bankMode = 'in', bankAmt = '', bankErr = '';
+  function bankSum() {
+    if (bankErr) return '<span class="err">' + esc(bankErr) + '</span>';
+    const x = parseFloat(bankAmt) || 0;
+    return x ? '<b>' + SK.fmtMoney(x) + '</b>' : '최대 ' + SK.fmtMoney(G.bankMax(bankMode));
+  }
+  function showBank(kind) {
+    setPlaying(false);
+    if (kind) { bankKind = kind; bankMode = kind === 'dep' ? 'in' : 'borrow'; bankAmt = ''; bankErr = ''; }
+    const S = G.state, dep = bankKind === 'dep';
+    const modes = dep ? [['in', '입금'], ['out', '출금']] : [['borrow', '빌리기'], ['repay', '갚기']];
+    openModal(
+      '<div class="card-head"><div><h2>' + (dep ? '예금' : '신용 융자') + '</h2><p class="sub">' +
+      (dep ? '그 시절 금리로 매주 이자가 붙습니다. 언제든 넣고 뺄 수 있습니다.' : '증권사에서 돈을 빌려 투자합니다. 담보비율(총자산 ÷ 융자금)이 140% 아래로 내려가면 강제로 정리됩니다.') +
+      '</p></div><button type="button" class="icon-btn" data-m="close" aria-label="닫기">×</button></div>' +
+      '<dl class="kv">' + (dep
+        ? '<div><dt>예금 잔액</dt><dd>' + SK.fmtMoney(S.deposit) + '</dd></div><div><dt>금리</dt><dd>연 ' + pct1(G.rate()) + '</dd></div><div><dt>현금</dt><dd>' + SK.fmtMoney(S.cash) + '</dd></div>'
+        : '<div><dt>융자금</dt><dd>' + SK.fmtMoney(S.loan) + '</dd></div><div><dt>금리</dt><dd>연 ' + pct1(G.loanRate()) + '</dd></div><div><dt>담보비율</dt><dd>' + (S.loan > 0 ? Math.round(G.marginRatio() * 100) + '%' : '-') + '</dd></div><div><dt>빌릴 수 있는 돈</dt><dd>' + SK.fmtMoney(G.maxBorrow()) + '</dd></div>') + '</dl>' +
+      '<div class="trade"><div class="seg">' + modes.map(([m, l]) => '<button type="button" data-bmode="' + m + '" class="' + (m === bankMode ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
+      '<label class="qty"><input id="bank-amt" type="text" inputmode="numeric" placeholder="금액" autocomplete="off" value="' + esc(bankAmt) + '"><span>' + unit() + '</span></label>' +
+      '<div class="chips">' + [[0.1, '10%'], [0.25, '25%'], [0.5, '50%'], [1, '최대']].map(([v, l]) => '<button type="button" data-bpct="' + v + '">' + l + '</button>').join('') + '</div>' +
+      '<p class="sum" id="bank-sum">' + bankSum() + '</p>' +
+      '<div class="card-foot"><button type="button" class="ghost" data-m="close">닫기</button><button type="button" class="primary" data-m="bank-go">' + modes.find((m) => m[0] === bankMode)[1] + '</button></div></div>');
+  }
+  $('#modal').addEventListener('input', (e) => {
+    if (e.target.id !== 'bank-amt') return;
+    bankAmt = e.target.value.replace(/[^0-9]/g, '');
+    if (bankAmt !== e.target.value) e.target.value = bankAmt;
+    bankErr = '';
+    $('#bank-sum').innerHTML = bankSum();
+  });
+
   $('#modal').addEventListener('click', (e) => {
+    const bb = e.target.closest('[data-bmode],[data-bpct]');
+    if (bb) {
+      bankErr = '';
+      if (bb.dataset.bmode) { bankMode = bb.dataset.bmode; bankAmt = ''; }
+      else bankAmt = String(Math.floor(G.bankMax(bankMode) * +bb.dataset.bpct));
+      return showBank();
+    }
     const m = e.target.closest('[data-m]');
     if (!m) return;
-    if (m.dataset.m === 'close') closeModal();
+    if (m.dataset.m === 'bank-go') {
+      bankErr = G.bank(bankMode, parseFloat(bankAmt) || 0) || '';
+      if (!bankErr) { toast({ in: '입금했습니다', out: '출금했습니다', borrow: '융자를 받았습니다', repay: '융자를 갚았습니다' }[bankMode]); bankAmt = ''; renderAll(); }
+      return showBank();
+    }
+    if (m.dataset.m === 'close') { closeModal(); if (G.state && !$('#game-screen').hidden) renderAll(); }
     else if (m.dataset.m === 'ask-quit') showMenu(true);
     else if (m.dataset.m === 'quit') { closeModal(); G.clearSave(); showTitle(); }
   });
@@ -506,6 +560,8 @@
     if (cx) { G.cancelOrder(+cx.dataset.cancel); return renderAll(); }
     const sh = e.target.closest('.sec-head');
     if (sh) return toggleSector(sh.dataset.sector);
+    const bk = e.target.closest('[data-bank]');
+    if (bk) return showBank(bk.dataset.bank);
     const r = e.target.closest('.row');
     if (r) openSheet(r.dataset.id);
   });

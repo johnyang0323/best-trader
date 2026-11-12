@@ -66,6 +66,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; -webkit-tap-h
 .title { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; padding-block: 28px 24px; }
 .eyebrow { margin: 0; font-size: 12px; letter-spacing: 0.12em; color: var(--muted); }
 .title h1 { margin: 4px 0 8px; font: 400 clamp(64px, 20vw, 112px)/0.95 var(--display); letter-spacing: -0.01em; color: var(--ink); }
+.title h1 small { display: block; font-size: clamp(22px, 7vw, 34px); line-height: 1.2; margin-top: 10px; color: var(--gold); letter-spacing: 0; }
 .title h1::after { content: ""; display: block; width: 64px; height: 6px; margin-top: 14px; background: var(--gold-fill); }
 .lede { margin: 0; max-width: 34em; color: var(--muted); }
 .dial { display: flex; flex-direction: column; gap: 10px; }

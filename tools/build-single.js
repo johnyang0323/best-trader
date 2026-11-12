@@ -6,7 +6,7 @@ const html = read('index.html');
 const body = html.slice(html.indexOf('<body>') + 6, html.indexOf('</body>'))
   .replace(/<script src="([^"]+)"><\/script>/g, (_, src) => '<script>\n' + read(src) + '\n</script>');
 const font = html.match(/<link rel="stylesheet" href="https:\/\/fonts[^>]+>/)[0];
-const out = '<title>증권왕</title>\n<meta name="claude:viewport-fit-sides" content="cover">\n' + font +
+const out = html.match(/<title>.*<\/title>/)[0] + '\n<meta name="claude:viewport-fit-sides" content="cover">\n' + font +
   '\n<style>\n' + read('css/style.css') + '\n</style>\n' + body;
 const dest = process.argv[2] || path.join(root, 'dist', 'jeunggwonwang.html');
 fs.mkdirSync(path.dirname(dest), { recursive: true });
