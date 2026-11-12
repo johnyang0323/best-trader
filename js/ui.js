@@ -121,7 +121,7 @@
         chg.className = 'row-chg ' + cls(pnl);
       } else {
         const r = weekChg(a);
-        sub.innerHTML = esc(a.def.sector) + (h ? ' · <span class="own">보유 ' + SK.fmtQty(h.qty, a) + '</span>' : '');
+        sub.innerHTML = h ? '<span class="own">보유 ' + SK.fmtQty(h.qty, a) + '</span>' : esc(a.def.desc);
         price.textContent = SK.fmtPx(a.price);
         chg.textContent = fmtPct(r);
         chg.className = 'row-chg ' + cls(r);
@@ -129,10 +129,44 @@
     });
   }
 
+  // 업종별 묶음. 머리줄에는 6개월 평균 등락과 지금 걸린 호재·악재를 보여 준다.
+  let secOpen = {};
+  function briefHtml(sector) {
+    const b = SK.sectorBrief(sector, G.world.t);
+    return b.good.map((t) => '<span class="brief"><b class="up">호재</b>' + esc(t) + '</span>')
+      .concat(b.bad.map((t) => '<span class="brief"><b class="down">악재</b>' + esc(t) + '</span>')).join('');
+  }
   function renderMarket() {
     const live = G.world.assets.filter((a) => a.listed && !a.dead);
-    live.sort((a, b) => (b.kind === 'crypto') - (a.kind === 'crypto') || (b.kind === 'etf') - (a.kind === 'etf'));
-    syncList($('#market-list'), live, false);
+    const groups = SK.SECTORS.map((s) => ({ s, list: live.filter((a) => a.def.sector === s) })).filter((g) => g.list.length);
+    const isOpen = (s) => (s in secOpen ? secOpen[s] : live.length <= 12 || s === '가상자산' || s === 'ETF');
+    const box = $('#market-list');
+    const key = groups.map((g) => g.s + (isOpen(g.s) ? '+' : '-')).join('|');
+    if (box.dataset.key !== key) {
+      box.dataset.key = key;
+      box.innerHTML = groups.map((g) =>
+        '<section class="sec"><button type="button" class="sec-head" data-sector="' + esc(g.s) + '" aria-expanded="' + isOpen(g.s) + '">' +
+        '<span class="sec-name">' + esc(g.s) + '<small></small></span><span class="sec-chg"></span><span class="sec-caret">' + (isOpen(g.s) ? '−' : '+') + '</span></button>' +
+        '<div class="sec-brief"></div><div class="list"' + (isOpen(g.s) ? '' : ' hidden') + '></div></section>').join('');
+    }
+    groups.forEach((g, i) => {
+      const el = box.children[i];
+      let sum = 0;
+      for (const a of g.list) { const n = a.hist.length; sum += a.price / a.hist[Math.max(0, n - 27)] - 1; }
+      const avg = sum / g.list.length, chg = el.querySelector('.sec-chg');
+      const own = g.list.filter((a) => G.state.holdings[a.id]).length;
+      el.querySelector('small').textContent = g.list.length + '종목' + (own ? ' · 보유 ' + own : '');
+      chg.textContent = '6개월 ' + fmtPct(avg);
+      chg.className = 'sec-chg ' + cls(avg);
+      const brief = briefHtml(g.s), bel = el.querySelector('.sec-brief');
+      if (bel.dataset.h !== brief) { bel.dataset.h = brief; bel.innerHTML = brief; bel.hidden = !brief; }
+      if (isOpen(g.s)) syncList(el.querySelector('.list'), g.list, false);
+    });
+  }
+  function toggleSector(s) {
+    const live = G.world.assets.filter((a) => a.listed && !a.dead).length;
+    secOpen[s] = !(s in secOpen ? secOpen[s] : live <= 12 || s === '가상자산' || s === 'ETF');
+    renderMarket();
   }
 
   function renderPort(full) {
@@ -223,7 +257,7 @@
       const v = inv(a + ((b - a) * i) / 3), y = Y(v);
       x.strokeStyle = c('--line'); x.lineWidth = 1; x.beginPath(); x.moveTo(0, y); x.lineTo(pw, y); x.stroke();
       x.fillStyle = c('--muted');
-      x.fillText(v >= 1e6 ? SK.fmtMoney(v, '') : SK.fmtPx(v), pw + 6, y);
+      x.fillText(v >= 1e12 ? (v / 1e12).toFixed(1) + '조' : v >= 1e8 ? (v / 1e8).toFixed(1) + '억' : v >= 1e6 ? comma(v / 1e4) + '만' : SK.fmtPx(v), pw + 6, y);
     }
     const col = data[data.length - 1] >= data[0] ? c('--up') : c('--down');
     x.beginPath();
@@ -278,6 +312,7 @@
       '<div class="card" role="dialog" aria-label="' + esc(a.def.name) + '">' +
       '<div class="card-head"><div><h2>' + esc(a.def.name) + '</h2><p class="sub">' + esc(a.def.sector) + ' · ' + esc(a.def.desc) + '</p></div>' +
       '<button type="button" class="icon-btn" data-act="close" aria-label="닫기">×</button></div>' +
+      (briefHtml(a.def.sector) ? '<div class="sec-brief">' + briefHtml(a.def.sector) + '</div>' : '') +
       '<div class="px"><b>' + SK.fmtPx(a.price) + '</b><span>' + unit() + '</span><span class="' + cls(r) + '">' + fmtPct(r) + ' (' + ranges.find((x) => x[0] === sheetRange)[1] + ')</span></div>' +
       '<div class="chips">' + ranges.map(([v, l]) => '<button type="button" data-range="' + v + '" class="' + (v === sheetRange ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
       '<canvas class="chart" id="sp-chart"></canvas>' +
@@ -336,7 +371,7 @@
     openModal(
       '<div class="card-head"><div><h2>메뉴</h2><p class="sub">' + esc(G.state.name) + ' · ' + SK.RANKS[G.state.rank].name + '</p></div><button type="button" class="icon-btn" data-m="close" aria-label="닫기">×</button></div>' +
       '<label class="check"><input type="checkbox" id="opt-pause" ' + (G.state.autoPause ? 'checked' : '') + '>속보가 뜨면 시간 멈추기</label>' +
-      '<ul class="help"><li>한 번에 한 주씩 흐릅니다. 종목을 누르면 시간이 멈추고 매매 창이 열립니다.</li><li>매달 직급에 맞는 저축액이 현금으로 들어옵니다.</li><li>순자산이 늘면 승진합니다. 2026년 가치로 1조 원이면 증권왕입니다.</li><li>부도난 회사의 주식은 거의 전부 잃습니다. 뉴스를 확인하세요.</li><li>게임은 2026년 11월에 끝납니다. 진행 상황은 이 기기에 자동 저장됩니다.</li></ul>' +
+      '<ul class="help"><li>한 번에 한 주씩 흐릅니다. 종목을 누르면 시간이 멈추고 매매 창이 열립니다.</li><li>매달 직급에 맞는 저축액이 현금으로 들어옵니다.</li><li>순자산이 늘면 승진합니다. 2026년 가치로 1조 원이면 증권왕입니다.</li><li>시장 탭은 업종별로 묶여 있습니다. 업종 이름을 누르면 종목이 펼쳐지고, 그 아래에 지금의 호재와 악재가 요약됩니다.</li><li>부도난 회사의 주식은 거의 전부 잃습니다. 뉴스를 확인하세요.</li><li>게임은 2026년 11월에 끝납니다. 진행 상황은 이 기기에 자동 저장됩니다.</li></ul>' +
       (confirming
         ? '<p class="err">지금 판을 버리고 처음으로 돌아갑니다.</p><div class="card-foot"><button type="button" class="ghost" data-m="close">계속하기</button><button type="button" class="primary" data-m="quit">버리고 나가기</button></div>'
         : '<div class="card-foot"><button type="button" class="ghost" data-m="ask-quit">새 게임</button><button type="button" class="primary" data-m="close">계속하기</button></div>'));
@@ -412,6 +447,7 @@
   });
   $('#btn-start').addEventListener('click', () => {
     G.newGame(+$('#year').value, $('#player-name').value.trim());
+    secOpen = {};
     tab = 'market';
     setTab('market');
     showGame();
@@ -433,6 +469,8 @@
     if (b) setTab(b.dataset.tab);
   });
   $('#pane').addEventListener('click', (e) => {
+    const sh = e.target.closest('.sec-head');
+    if (sh) return toggleSector(sh.dataset.sector);
     const r = e.target.closest('.row');
     if (r) openSheet(r.dataset.id);
   });

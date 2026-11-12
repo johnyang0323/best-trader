@@ -43,6 +43,13 @@
     };
   }
 
+  // 지금 이 업종에 걸려 있는 호재·악재
+  SK.sectorBrief = function (sector, t) {
+    const out = { good: [], bad: [] };
+    for (const [a, b, v, text] of SK.SECTOR_WAVES[sector] || []) if (t >= a && t < b) (v > 0 ? out.good : out.bad).push(text);
+    return out;
+  };
+
   function sectorDrift(sector, t) {
     const waves = SK.SECTOR_WAVES[sector];
     if (!waves) return 0;
@@ -95,6 +102,15 @@
           a.hist = a.hist.map((p) => p / 10);
         }
         evts.push({ type: 'reform' });
+      }
+
+      // 업종 호재·악재가 시작되면 뉴스로 알린다
+      if (W.week > 0) {
+        const prevT = SK.tOf(W.week - 1);
+        for (const sector in SK.SECTOR_WAVES) {
+          if (!W.assets.some((a) => a.def.sector === sector && a.listed && !a.dead)) continue;
+          for (const [from, , v, text] of SK.SECTOR_WAVES[sector]) if (from > prevT && from <= t) news((v > 0 ? '호재 · ' : '악재 · ') + sector, text + '.');
+        }
       }
 
       const aLog = Math.log(SK.indexAnchor(t));

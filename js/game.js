@@ -1,6 +1,6 @@
 /* 증권왕 — 플레이어 상태, 매매, 저장 */
 (function (SK) {
-  const KEY = 'jeunggwonwang.save.v1';
+  const KEY = 'jeunggwonwang.save.v2';
   const FEE = { buy: 0.001, sell: 0.003 }; // 매도에는 거래세 포함
   const G = { state: null, world: null, FEE };
 
@@ -40,7 +40,7 @@
     while (W.week < startWeek) W.step();
     const cap = G.startCapitalFor(year);
     G.state = {
-      v: 1, seed, name: name || '신입', startWeek, week: W.week, cash: cap, startCap: cap,
+      v: 2, seed, name: name || '신입', startWeek, week: W.week, cash: cap, startCap: cap,
       startIndex: W.index, holdings: {}, rank: 0, nwHist: [cap], log: [], autoPause: true,
       over: false, btcWeek: -1, btcBought: 0, month: SK.dateOf(W.week).getUTCMonth()
     };
@@ -57,7 +57,7 @@
   G.peekSave = function () {
     try {
       const s = JSON.parse(localStorage.getItem(KEY));
-      return s && s.v === 1 ? s : null;
+      return s && s.v === 2 ? s : null;
     } catch (e) { return null; }
   };
   G.load = function () {
