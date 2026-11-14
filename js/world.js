@@ -58,7 +58,11 @@
     return { week: SK.weekOfDate(y, m, dd), title, body, major: !!major };
   });
 
-  SK.createWorld = function (seed) {
+  /* randomFrom: 이 주차까지는 실제 역사를 따르고, 그 뒤로는 지수·재료·부도·비트코인이 모두 난수로 흘러간다.
+   * null이면 끝까지 역사를 따른다. */
+  SK.createWorld = function (seed, randomFrom) {
+    if (randomFrom === undefined) randomFrom = null;
+    const randT = randomFrom === null ? Infinity : SK.tOf(randomFrom);
     const rnd = mulberry32(seed);
     const gauss = () => {
       let u = 0;
@@ -73,7 +77,31 @@
         const r = rnd(), len = to - from;
         const m = Math.abs(v) >= 1.5 ? 0.7 + 0.5 * rnd() : r < 0.65 ? 0.6 + 0.7 * rnd() : r < 0.9 ? 0.3 * rnd() : -0.5;
         return { from, to, v: v * m, good: v > 0, text, showFrom: from + Math.min(0.5, len * 0.3) * rnd(), showTo: to + Math.min(0.4, len * 0.25) * rnd() };
-      });
+      }).filter((x) => x.from <= randT); // 랜덤 미래에서는 입사 뒤에 시작될 역사 속 재료를 버린다
+    }
+    waves['가상자산'] = [];
+    const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+    const btcK = 0.6 + 0.5 * rnd(); // 판마다 다른 비트코인의 운
+    let reg = { type: 'normal', left: Infinity }, baseLog = 0, btcReg = { type: 'calm', left: 0 }, btcLog = null, banUntil = -1, trendLog = null;
+    const setReg = (type, week) => {
+      const left = { bull: 40 + rnd() * 90, bear: 30 + rnd() * 70, crash: 5 + rnd() * 9, normal: Infinity }[type];
+      reg = { type, left, rate: type === 'crash' ? (-(0.25 + 0.35 * rnd()) / left) * WPY : 0, newsAt: type === 'crash' ? week : week + 2 + Math.floor(rnd() * 6) };
+    };
+    // 랜덤 미래의 지수 한 주 변화: 평소·강세·약세·폭락 국면이 불규칙하게 바뀐다
+    const macroStep = (t, week) => {
+      if (reg.type === 'normal') {
+        const r = rnd();
+        if (r < 1 / 160) setReg('bull', week); else if (r < 1 / 160 + 1 / 350) setReg('bear', week); else if (r < 1 / 160 + 1 / 350 + 1 / 450) setReg('crash', week);
+      } else if (--reg.left <= 0) {
+        const r = rnd(), p = reg.type;
+        setReg(p === 'bull' ? (r < 0.25 ? 'crash' : r < 0.5 ? 'bear' : 'normal') : p === 'crash' ? (r < 0.6 ? 'bull' : 'normal') : r < 0.4 ? 'bull' : 'normal', week);
+      }
+      const infl = Math.log(SK.cpi(t + 0.5) / SK.cpi(t - 0.5));
+      // 장기 추세(물가 + 6%)에서 너무 멀어지면 천천히 끌려온다
+      if (trendLog === null) trendLog = baseLog;
+      trendLog += (0.06 + infl) / WPY;
+      const mu = { normal: 0.05 + infl, bull: 0.35 + infl, bear: -0.28, crash: reg.rate }[reg.type] - 0.08 * (baseLog - trendLog);
+      return mu / WPY + 0.012 * gauss();
     }
     const rumors = []; // { sector, good, text, from, to (주차), v }
     const sectorDrift = (sector, t, week) => {
@@ -83,7 +111,7 @@
       return d;
     };
 
-    const W = { seed, week: -1, t: 0, unit: '환', index: 0, idxHist: [], assets: [], byId: {}, news: [] };
+    const W = { seed, randomFrom, week: -1, t: 0, unit: '환', index: 0, idxHist: [], assets: [], byId: {}, news: [] };
     let noise = 0, prevA = null, btcNoise = 0;
 
     for (const def of SK.ASSETS) {
@@ -100,6 +128,8 @@
       return out;
     };
 
+    W.shortBanned = () => (W.randomFrom !== null && W.week > W.randomFrom ? W.week < banUntil : SK.shortBanned(W.t));
+
     W.step = function () {
       W.week++;
       const t = (W.t = SK.tOf(W.week));
@@ -110,7 +140,8 @@
         evts.push({ type: 'news', news: n });
       };
 
-      for (const e of EVENT_WEEKS) if (e.week === W.week) news(e.title, e.body, e.major);
+      const rand = randomFrom !== null && W.week > randomFrom;
+      for (const e of EVENT_WEEKS) if (e.week === W.week && (!rand || SK.STRUCTURAL.includes(e.title))) news(e.title, e.body, e.major);
 
       // 화폐개혁: 모든 가격을 10분의 1로
       if (W.unit === '환' && t >= SK.REFORM_T) {
@@ -131,6 +162,14 @@
         for (const sector in waves) {
           if (!W.assets.some((a) => a.def.sector === sector && a.listed && !a.dead)) continue;
           for (const x of waves[sector]) if (x.showFrom > prevT && x.showFrom <= t) news((x.good ? '호재 · ' : '악재 · ') + sector, x.text + '.');
+          // 랜덤 미래: 업종 재료도 새로 생겨난다. 문구는 그 업종이 겪어 본 재료와 흔한 재료에서 고른다.
+          if (rand && !waves[sector].some((x) => x.to > t) && rnd() < 1 / 90) {
+            const good = rnd() < 0.5, r = rnd(), len = 0.4 + 1.6 * rnd(), mag = 0.15 + 0.4 * rnd();
+            const m = r < 0.65 ? 0.6 + 0.7 * rnd() : r < 0.9 ? 0.3 * rnd() : -0.5;
+            const pool = (SK.SECTOR_WAVES[sector] || []).filter((x) => x[2] > 0 === good && x[0] <= t).map((x) => x[3]).concat(RUMORS[good ? 'good' : 'bad'].slice(0, 3));
+            const from = t + 0.02, lag = Math.min(0.5, len * 0.3) * rnd();
+            waves[sector].push({ from, to: from + len, v: (good ? 1 : -1) * mag * m, good, text: pick(pool), showFrom: from + lag, showTo: from + len + Math.min(0.4, len * 0.25) * rnd() });
+          }
           if (rumors.some((x) => x.sector === sector) || rnd() > 1 / 130) continue;
           const good = rnd() < 0.5, r = rnd(), sign = good ? 1 : -1;
           const x = {
@@ -143,13 +182,31 @@
         }
       }
 
-      const aLog = Math.log(SK.indexAnchor(t));
-      const dA = prevA === null ? 0 : aLog - prevA;
-      prevA = aLog;
+      let dA;
+      if (!rand) {
+        const aLog = Math.log(SK.indexAnchor(t));
+        dA = prevA === null ? 0 : aLog - prevA;
+        prevA = baseLog = aLog;
+      } else {
+        dA = macroStep(t, W.week);
+        baseLog += dA;
+        if (reg.newsAt === W.week) {
+          const [title, body] = pick(SK.MACRO[reg.type] || [[]]);
+          if (title) news(title, body, reg.type === 'crash');
+          if (reg.type === 'crash') {
+            banUntil = W.week + Math.round(reg.left) + 20;
+            news('공매도 한시 금지', '주가 급락에 당국이 공매도를 막았다.');
+          }
+        } else if (rnd() < 1 / 200) { // 시장 전체에도 헛소문이 돈다
+          const [title, body] = pick(SK.MACRO[rnd() < 0.5 ? 'bull' : 'bear']);
+          news(title, body);
+        }
+        if (banUntil === W.week) news('공매도 재개', '금지 조치가 풀렸다.');
+      }
       const n1 = noise * 0.97 + 0.018 * gauss();
       const dN = n1 - noise;
       noise = n1;
-      W.index = Math.exp(aLog + noise);
+      W.index = Math.exp(baseLog + noise);
       W.idxHist.push(W.index);
       btcNoise = btcNoise * 0.9 + 0.07 * gauss();
 
@@ -173,7 +230,41 @@
           a.dev = dev1;
         }
         if (a.kind === 'etf') a.lp = Math.log(W.index * 10);
-        if (a.kind === 'crypto') a.lp = Math.log(interp(SK.BTC_ANCHORS, t, true)) + btcNoise;
+        if (a.kind === 'crypto') {
+          if (!rand) a.lp = (btcLog = Math.log(interp(SK.BTC_ANCHORS, t, true))) + btcNoise;
+          else {
+            // 랜덤 미래의 비트코인: 초기일수록 가파르게 오르는 추세에 급등·급락 국면이 얹힌다
+            if (btcLog === null) btcLog = 0;
+            if (--btcReg.left <= 0) {
+              const p = btcReg.type, r = rnd();
+              const type = p === 'boom' ? (r < 0.8 ? 'bust' : 'calm') : p === 'bust' ? 'calm' : r < 1 / 60 ? 'boom' : r < 1 / 60 + 1 / 300 ? 'bust' : 'calm';
+              btcReg = { type, left: type === 'boom' ? 25 + rnd() * 30 : type === 'bust' ? 30 + rnd() * 35 : 1 };
+              if (type !== 'calm') {
+                const from = t + 0.05 + 0.15 * rnd(), good = type === 'boom';
+                waves['가상자산'].push({ from, to: from + 0.5, v: 0, good, text: pick(SK.BTC_NEWS[good ? 'good' : 'bad']), showFrom: from, showTo: from + 0.4 + 0.4 * rnd() });
+              }
+            }
+            btcLog += (btcK * 3.2 * Math.exp(-(t - 2009) / 5) + { boom: 2.0, bust: -1.6, calm: 0 }[btcReg.type]) / WPY + 0.06 * z;
+            a.lp = btcLog + btcNoise;
+          }
+        }
+        // 랜덤 미래의 부도: 자금난 소문이 먼저 돌고, 몇 달 뒤 쓰러지거나 살아난다
+        let failed = false;
+        if (rand && a.kind === 'stock' && !fresh) {
+          if (!a.distress) {
+            const hz = (1 / 20000) * (reg.type === 'crash' || reg.type === 'bear' ? 3 : 1) * (a.dev < -0.6 ? 3 : 1);
+            if (rnd() < hz) {
+              a.distress = { until: W.week + 8 + Math.floor(rnd() * 26), fail: rnd() < 0.65 };
+              news(def.name + ' 자금난 소문', pick(['어음을 막기 어렵다는 말이 돈다.', '차입금이 감당하기 어려운 수준이라는 보도가 나왔다.', '주거래 은행이 대출 연장을 망설인다.']), true);
+            }
+          } else {
+            a.lp -= 1.2 / WPY;
+            if (W.week >= a.distress.until) {
+              if (a.distress.fail) failed = true;
+              else { a.lp += 0.25; a.distress = null; news(def.name + ' 위기 탈출', '채권단 지원으로 자금난을 넘겼다.'); }
+            }
+          }
+        }
         if (divWeek && !fresh) {
           const y = SK.divYield(def, t);
           if (y > 0) {
@@ -184,15 +275,17 @@
         a.price = SK.roundPx(Math.exp(a.lp));
         if (div > 0) evts.push({ type: 'div', asset: a, amount: div });
 
-        if (def.end && t >= def.end.t) {
-          a.price = SK.roundPx(a.price * def.end.mult);
+        // 역사 속 퇴출은 입사 전의 것과 제도상 합병·폐지만 따른다
+        const end = failed ? { type: 'bankrupt', mult: 0.03 } : def.end && t >= def.end.t && (def.end.t <= randT || def.end.mult === 1) ? def.end : null;
+        if (end) {
+          a.price = SK.roundPx(a.price * end.mult);
           a.dead = true;
-          a.endType = def.end.type;
+          a.endType = end.type;
           const msg = {
             merge: ['합병: ' + def.name, '다른 회사와 합쳐지며 상장이 끝났다. 주주에게는 마지막 가격으로 대금이 지급된다.'],
             delist: ['상장폐지: ' + def.name, '거래가 끝났다. 보유 주식은 마지막 가격으로 정리된다.'],
             bankrupt: ['부도: ' + def.name, '회사가 무너졌다. 주식은 정리매매 가격으로 처분된다.']
-          }[def.end.type];
+          }[end.type];
           news(msg[0], msg[1], true);
           evts.push({ type: 'end', asset: a });
         }

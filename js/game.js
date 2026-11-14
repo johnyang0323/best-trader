@@ -1,6 +1,6 @@
 /* 증권왕 — 플레이어 상태, 매매, 저장 */
 (function (SK) {
-  const KEY = 'jeunggwonwang.save.v4';
+  const KEY = 'jeunggwonwang.save.v5';
   const FEE = { buy: 0.001, sell: 0.003 }; // 매도에는 거래세 포함
   const G = { state: null, world: null, FEE };
 
@@ -49,14 +49,14 @@
     if (G.state.log.length > 60) G.state.log.length = 60;
   }
 
-  G.newGame = function (year, name) {
+  G.newGame = function (year, name, random) {
     const seed = (Math.random() * 4294967296) >>> 0;
-    const W = (G.world = SK.createWorld(seed));
     const startWeek = SK.weekOfDate(year, 1, 2);
+    const W = (G.world = SK.createWorld(seed, random ? startWeek : null));
     while (W.week < startWeek) W.step();
     const cap = G.startCapitalFor(year);
     G.state = {
-      v: 4, seed, name: name || '신입', startWeek, week: W.week, cash: cap, startCap: cap,
+      v: 5, seed, random: !!random, name: name || '신입', startWeek, week: W.week, cash: cap, startCap: cap,
       startIndex: W.index, holdings: {}, rank: 0, nwHist: [cap], log: [], autoPause: true,
       orders: [], orderSeq: 0, deposit: 0, loan: 0, shorts: {}, endWeek: Math.min(SK.END_WEEK, startWeek + Math.ceil((SK.RETIRE_AGE - SK.START_AGE) * 52.18)), warned: false, bust: false, over: false, btcWeek: -1, btcBought: 0, month: SK.dateOf(W.week).getUTCMonth()
     };
@@ -73,13 +73,13 @@
   G.peekSave = function () {
     try {
       const s = JSON.parse(localStorage.getItem(KEY));
-      return s && s.v === 4 ? s : null;
+      return s && s.v === 5 ? s : null;
     } catch (e) { return null; }
   };
   G.load = function () {
     const s = G.peekSave();
     if (!s) return false;
-    const W = (G.world = SK.createWorld(s.seed));
+    const W = (G.world = SK.createWorld(s.seed, s.random ? s.startWeek : null));
     while (W.week < s.week) W.step();
     s.deposit = s.deposit || 0; s.loan = s.loan || 0;
     G.state = s;
@@ -243,7 +243,7 @@
   G.shortBlock = function (id) {
     const a = G.world.byId[id];
     if (a.kind === 'crypto') return '비트코인은 공매도할 수 없습니다';
-    if (SK.shortBanned(G.world.t)) return '지금은 공매도가 금지된 기간입니다';
+    if (G.world.shortBanned()) return '지금은 공매도가 금지된 기간입니다';
     return null;
   };
   G.maxShort = (id) => (G.shortBlock(id) ? 0 : Math.max(0, Math.floor((G.assets() - 2 * G.liab()) / (G.world.byId[id].price * (1 + FEE.sell)))));

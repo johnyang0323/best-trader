@@ -30,7 +30,7 @@
   /* ---------- 상태 ---------- */
   let playing = false, speed = 1, timer = null, tab = 'market';
   let sheetId = null, sheetRange = 156, sheetMode = 'buy', sheetQty = '', sheetErr = '', resume = false;
-  let sSide = 'short';
+  let sSide = 'short', futureMode = 'random';
   const C_SIDES = [['sell', '조건 매도'], ['buy', '조건 매수'], ['short', '조건 공매도'], ['cover', '조건 환매수']];
   const C_DIR = { sell: 'below', buy: 'above', short: 'below', cover: 'above' }; // 기본 방향: 손절·추격 매수·하락 추격·공매도 손절
   let cSide = 'sell', cDir = 'below', cBasis = 'price', cVal = '', cQty = '';
@@ -81,7 +81,7 @@
     const W = G.world, S = G.state;
     const d = SK.dateOf(W.week);
     $('#hud-date').textContent = fmtDate(W.week);
-    $('#hud-era').textContent = G.age() + '세 · ' + eraOf(d.getUTCFullYear()).name;
+    $('#hud-era').textContent = G.age() + '세 · ' + (G.state.random ? '입사 ' + (G.age() - SK.START_AGE + 1) + '년 차' : eraOf(d.getUTCFullYear()).name);
     $('#hud-index').textContent = SK.fmtPx(W.index);
     const h = W.idxHist, r = h.length > 1 ? h[h.length - 1] / h[h.length - 2] - 1 : 0;
     const chg = $('#hud-index-chg');
@@ -441,7 +441,7 @@
     openModal(
       '<div class="card-head"><div><h2>메뉴</h2><p class="sub">' + esc(G.state.name) + ' · ' + SK.RANKS[G.state.rank].name + '</p></div><button type="button" class="icon-btn" data-m="close" aria-label="닫기">×</button></div>' +
       '<label class="check"><input type="checkbox" id="opt-pause" ' + (G.state.autoPause ? 'checked' : '') + '>속보가 뜨면 시간 멈추기</label>' +
-      '<ul class="help"><li>한 번에 한 주씩 흐릅니다. 종목을 누르면 시간이 멈추고 매매 창이 열립니다.</li><li>매달 직급에 맞는 저축액이 현금으로 들어옵니다.</li><li>순자산이 늘면 승진합니다. 2026년 가치로 1000억 원이면 증권왕입니다.</li><li>내 계좌의 예금은 그 시절 금리로 이자가 붙습니다. 신용 융자는 총자산이 융자금의 2배 이상일 때 빌릴 수 있고, 140% 아래로 내려가면 반대매매됩니다.</li><li>시장 탭은 업종별로 묶여 있습니다. 업종 이름을 누르면 종목이 펼쳐지고, 그 아래에 지금의 호재와 악재가 요약됩니다.</li><li>호재와 악재가 모두 맞지는 않습니다. 헛소문도 있고, 이미 주가에 반영됐거나 거꾸로 가는 재료도 있습니다.</li><li>종목 창의 조건 주문으로 손절·익절·추격 매수를 미리 걸 수 있고, 공매도와 환매수에도 걸 수 있습니다. 가격 또는 평단 대비 %로 기준을 정합니다.</li><li>주식은 매년 4월 첫 주에 배당을 줍니다. 배당만큼 주가가 내려가고(배당락), 세금 15.4%를 뗍니다.</li><li>공매도는 내릴 것 같은 주식을 빌려서 먼저 파는 거래입니다. 주가가 오르면 손실이고 담보비율 규칙은 신용 융자와 같습니다. 금지된 시기에는 새로 걸 수 없습니다.</li><li>부도난 회사의 주식은 거의 전부 잃습니다. 뉴스를 확인하세요.</li><li>24세에 입사해 65세 정년 또는 2026년 11월 중 먼저 오는 때에 끝납니다. 진행 상황은 이 기기에 자동 저장됩니다.</li></ul>' +
+      '<ul class="help"><li>한 번에 한 주씩 흐릅니다. 종목을 누르면 시간이 멈추고 매매 창이 열립니다.</li><li>매달 직급에 맞는 저축액이 현금으로 들어옵니다.</li><li>순자산이 늘면 승진합니다. 2026년 가치로 1000억 원이면 증권왕입니다.</li><li>내 계좌의 예금은 그 시절 금리로 이자가 붙습니다. 신용 융자는 총자산이 융자금의 2배 이상일 때 빌릴 수 있고, 140% 아래로 내려가면 반대매매됩니다.</li><li>시장 탭은 업종별로 묶여 있습니다. 업종 이름을 누르면 종목이 펼쳐지고, 그 아래에 지금의 호재와 악재가 요약됩니다.</li><li>호재와 악재가 모두 맞지는 않습니다. 헛소문도 있고, 이미 주가에 반영됐거나 거꾸로 가는 재료도 있습니다.</li><li>종목 창의 조건 주문으로 손절·익절·추격 매수를 미리 걸 수 있고, 공매도와 환매수에도 걸 수 있습니다. 가격 또는 평단 대비 %로 기준을 정합니다.</li><li>주식은 매년 4월 첫 주에 배당을 줍니다. 배당만큼 주가가 내려가고(배당락), 세금 15.4%를 뗍니다.</li><li>공매도는 내릴 것 같은 주식을 빌려서 먼저 파는 거래입니다. 주가가 오르면 손실이고 담보비율 규칙은 신용 융자와 같습니다. 금지된 시기에는 새로 걸 수 없습니다.</li><li>랜덤 미래로 시작했다면 입사 뒤의 일은 실제 역사와 다릅니다. 화폐개혁과 비트코인 등장 같은 제도 변화만 그대로 일어납니다.</li><li>부도난 회사의 주식은 거의 전부 잃습니다. 뉴스를 확인하세요.</li><li>24세에 입사해 65세 정년 또는 2026년 11월 중 먼저 오는 때에 끝납니다. 진행 상황은 이 기기에 자동 저장됩니다.</li></ul>' +
       (confirming
         ? '<p class="err">지금 판을 버리고 처음으로 돌아갑니다.</p><div class="card-foot"><button type="button" class="ghost" data-m="close">계속하기</button><button type="button" class="primary" data-m="quit">버리고 나가기</button></div>'
         : '<div class="card-foot"><button type="button" class="ghost" data-m="ask-quit">새 게임</button><button type="button" class="primary" data-m="close">계속하기</button></div>'));
@@ -555,13 +555,22 @@
   }
 
   /* ---------- 이벤트 연결 ---------- */
+  $('#future').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    futureMode = b.dataset.future;
+    document.querySelectorAll('#future button').forEach((x) => x.classList.toggle('on', x === b));
+    $('#future-note').textContent = futureMode === 'random'
+      ? '입사 전까지는 실제 역사 그대로입니다. 입사한 뒤의 지수, 호재·악재, 부도, 비트코인은 판마다 전혀 다르게 흘러갑니다.'
+      : '입사한 뒤에도 실제 역사의 큰 흐름과 사건을 따라갑니다. 역사를 알면 유리합니다.';
+  });
   $('#year').addEventListener('input', renderEra);
   $('#year-presets').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (b) { $('#year').value = b.dataset.y; renderEra(); }
   });
   $('#btn-start').addEventListener('click', () => {
-    G.newGame(+$('#year').value, $('#player-name').value.trim());
+    G.newGame(+$('#year').value, $('#player-name').value.trim(), futureMode === 'random');
     secOpen = {};
     tab = 'market';
     setTab('market');
