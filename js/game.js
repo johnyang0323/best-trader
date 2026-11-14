@@ -1,6 +1,6 @@
 /* 증권왕 — 플레이어 상태, 매매, 저장 */
 (function (SK) {
-  const KEY = 'jeunggwonwang.save.v5';
+  const KEY = 'jeunggwonwang.save.v6';
   const FEE = { buy: 0.001, sell: 0.003 }; // 매도에는 거래세 포함
   const G = { state: null, world: null, FEE };
 
@@ -12,7 +12,7 @@
   const r4 = (q) => Math.round(q * 1e4) / 1e4;
 
   G.unitMult = () => (G.world.unit === '환' ? 10 : 1);
-  G.scale = () => SK.cpi(G.world.t) * G.unitMult();
+  G.scale = () => G.world.cpi * G.unitMult();
   G.startCapitalFor = (year) => {
     const t = Math.max(year, 1956.17);
     return roundSig(1e7 * SK.cpi(t) * (t < SK.REFORM_T ? 10 : 1), 2);
@@ -34,7 +34,7 @@
   G.age = () => SK.START_AGE + Math.floor((G.world.week - G.state.startWeek) / 52.18);
   G.DIV_TAX = 0.154;
   G.SHORT_FEE = 0.03; // 주식을 빌리는 연 수수료
-  G.rate = () => SK.interp(SK.RATES, G.world.t, false);
+  G.rate = () => G.world.rate;
   G.loanRate = () => G.rate() + 0.04;
   G.marginRatio = () => (G.liab() > 0 ? G.assets() / G.liab() : Infinity);
   // 융자 직후 담보비율이 200% 이상이어야 한다
@@ -56,7 +56,7 @@
     while (W.week < startWeek) W.step();
     const cap = G.startCapitalFor(year);
     G.state = {
-      v: 5, seed, random: !!random, name: name || '신입', startWeek, week: W.week, cash: cap, startCap: cap,
+      v: 6, seed, random: !!random, name: name || '신입', startWeek, week: W.week, cash: cap, startCap: cap,
       startIndex: W.index, holdings: {}, rank: 0, nwHist: [cap], log: [], autoPause: true,
       orders: [], orderSeq: 0, deposit: 0, loan: 0, shorts: {}, endWeek: Math.min(SK.END_WEEK, startWeek + Math.ceil((SK.RETIRE_AGE - SK.START_AGE) * 52.18)), warned: false, bust: false, over: false, btcWeek: -1, btcBought: 0, month: SK.dateOf(W.week).getUTCMonth()
     };
@@ -73,7 +73,7 @@
   G.peekSave = function () {
     try {
       const s = JSON.parse(localStorage.getItem(KEY));
-      return s && s.v === 5 ? s : null;
+      return s && s.v === 6 ? s : null;
     } catch (e) { return null; }
   };
   G.load = function () {

@@ -30,7 +30,6 @@
   SK.indexAnchor = (t) => interp(SK.INDEX_ANCHORS, t, true);
 
   // 초기 비트코인은 개인 간 거래뿐이라 주당 살 수 있는 양에 한도가 있다
-  SK.divYield = (def, t) => (SK.DIV_YIELD[def.sector] || 0) * Math.min(3, Math.max(1, interp(SK.RATES, t, false) / 0.04));
   SK.shortBanned = (t) => SK.SHORT_BANS.some(([a, b]) => t >= a && t < b);
   SK.btcCap = (t) => (t < 2010.5 ? 100 : t < 2011.5 ? 1000 : t < 2013.28 ? 10000 : Infinity);
 
@@ -96,7 +95,7 @@
         const r = rnd(), p = reg.type;
         setReg(p === 'bull' ? (r < 0.25 ? 'crash' : r < 0.5 ? 'bear' : 'normal') : p === 'crash' ? (r < 0.6 ? 'bull' : 'normal') : r < 0.4 ? 'bull' : 'normal', week);
       }
-      const infl = Math.log(SK.cpi(t + 0.5) / SK.cpi(t - 0.5));
+      const infl = W.infl;
       // 장기 추세(물가 + 6%)에서 너무 멀어지면 천천히 끌려온다
       if (trendLog === null) trendLog = baseLog;
       trendLog += (0.06 + infl) / WPY;
@@ -111,7 +110,8 @@
       return d;
     };
 
-    const W = { seed, randomFrom, week: -1, t: 0, unit: '환', index: 0, idxHist: [], assets: [], byId: {}, news: [] };
+    let inflTarget = 0, realRate = 0, rateNews = 0;
+    const W = { seed, randomFrom, cpi: 0, rate: 0, infl: 0, week: -1, t: 0, unit: '환', index: 0, idxHist: [], assets: [], byId: {}, news: [] };
     let noise = 0, prevA = null, btcNoise = 0;
 
     for (const def of SK.ASSETS) {
@@ -128,6 +128,7 @@
       return out;
     };
 
+    W.divYield = (def) => (SK.DIV_YIELD[def.sector] || 0) * Math.min(3, Math.max(1, W.rate / 0.04));
     W.shortBanned = () => (W.randomFrom !== null && W.week > W.randomFrom ? W.week < banUntil : SK.shortBanned(W.t));
 
     W.step = function () {
@@ -141,6 +142,29 @@
       };
 
       const rand = randomFrom !== null && W.week > randomFrom;
+      // 물가와 금리: 역사 구간은 기록을 따르고, 랜덤 미래에서는 물가 목표가 가끔 바뀌며 금리가 그 뒤를 따라간다
+      if (!rand) {
+        W.cpi = SK.cpi(t);
+        W.rate = rateNews = interp(SK.RATES, t, false);
+        W.infl = inflTarget = Math.log(SK.cpi(t + 0.5) / SK.cpi(t - 0.5));
+        realRate = W.rate - W.infl;
+      } else {
+        if (rnd() < 1 / 150) {
+          const old = inflTarget;
+          // 대개 연 0~6%, 드물게(5%) 연 10~25%의 물가 충격
+          inflTarget = rnd() < 0.05 ? 0.1 + 0.15 * rnd() : 0.005 + 0.12 * Math.pow(rnd(), 3);
+          if (inflTarget - old > 0.04) news('물가 불안', '생필품 값이 빠르게 오르기 시작했다.');
+          else if (old - inflTarget > 0.04) news('물가 안정세', '치솟던 물가가 잡히기 시작했다.');
+        }
+        W.infl = Math.max(-0.02, Math.min(0.4, W.infl + 0.03 * (inflTarget - W.infl) + 0.002 * gauss()));
+        W.cpi *= Math.exp(W.infl / WPY);
+        realRate += 0.02 * (0.02 - realRate) + 0.0015 * gauss();
+        W.rate = Math.max(0.005, Math.min(0.4, W.infl + realRate));
+        if (Math.abs(W.rate - rateNews) >= 0.02) {
+          news(W.rate > rateNews ? '금리 인상' : '금리 인하', '예금 금리가 연 ' + (W.rate * 100).toFixed(1) + '%가 됐다.');
+          rateNews = W.rate;
+        }
+      }
       for (const e of EVENT_WEEKS) if (e.week === W.week && (!rand || SK.STRUCTURAL.includes(e.title))) news(e.title, e.body, e.major);
 
       // 화폐개혁: 모든 가격을 10분의 1로
@@ -226,7 +250,7 @@
           if (W.week > 0) news('신규 상장: ' + def.name, def.desc, a.kind === 'crypto');
         } else if (a.kind === 'stock') {
           const dev1 = a.dev * 0.996 + def.sigma * z;
-          a.lp += def.beta * (dA + dN) + (def.alpha + SK.divYield(def, t) + sectorDrift(def.sector, t, W.week)) / WPY + (dev1 - a.dev);
+          a.lp += def.beta * (dA + dN) + (def.alpha + W.divYield(def) + sectorDrift(def.sector, t, W.week)) / WPY + (dev1 - a.dev);
           a.dev = dev1;
         }
         if (a.kind === 'etf') a.lp = Math.log(W.index * 10);
@@ -266,7 +290,7 @@
           }
         }
         if (divWeek && !fresh) {
-          const y = SK.divYield(def, t);
+          const y = W.divYield(def);
           if (y > 0) {
             div = Math.exp(a.lp) * y;
             if (a.kind === 'stock') a.lp += Math.log(1 - y); // 배당락

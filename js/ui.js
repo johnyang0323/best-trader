@@ -342,7 +342,7 @@
 
   function renderSheet() {
     const a = G.world.byId[sheetId], h = G.state.holdings[a.id], st = G.state.shorts[a.id], box = $('#sheet');
-    const dy = SK.divYield(a.def, G.world.t);
+    const dy = G.world.divYield(a.def);
     const n = sheetRange ? Math.min(sheetRange + 1, a.hist.length) : a.hist.length;
     const data = a.hist.slice(-n), r = data.length > 1 ? data[data.length - 1] / data[0] - 1 : 0;
     const ranges = [[26, '6개월'], [156, '3년'], [520, '10년'], [0, '전체']];
@@ -561,7 +561,7 @@
     futureMode = b.dataset.future;
     document.querySelectorAll('#future button').forEach((x) => x.classList.toggle('on', x === b));
     $('#future-note').textContent = futureMode === 'random'
-      ? '입사 전까지는 실제 역사 그대로입니다. 입사한 뒤의 지수, 호재·악재, 부도, 비트코인은 판마다 전혀 다르게 흘러갑니다.'
+      ? '입사 전까지는 실제 역사 그대로입니다. 입사한 뒤의 지수, 금리와 물가, 호재·악재, 부도, 비트코인은 판마다 전혀 다르게 흘러갑니다.'
       : '입사한 뒤에도 실제 역사의 큰 흐름과 사건을 따라갑니다. 역사를 알면 유리합니다.';
   });
   $('#year').addEventListener('input', renderEra);
