@@ -284,25 +284,32 @@
 
   /* 조건 주문: 가격이 기준에 닿은 주에 그 주 가격으로 체결된다.
    * { id, asset, side: buy|sell, dir: below|above, basis: price|avg, value: 가격 또는 평단 대비 %, qty } */
+  const SIDE = { buy: '매수', sell: '매도', short: '공매도', cover: '환매수' };
+  const isShortSide = (side) => side === 'short' || side === 'cover';
+  // 평단 기준의 기준점: 일반 주문은 보유 평단, 공매도 주문은 평균 매도가
+  G.orderPos = (o) => (isShortSide(o.side) ? G.state.shorts : G.state.holdings)[o.asset];
   G.orderTrigger = function (o) {
     if (o.basis === 'price') return o.value;
-    const h = G.state.holdings[o.asset];
+    const h = G.orderPos(o);
     return h ? h.avg * (1 + ((o.dir === 'below' ? -1 : 1) * o.value) / 100) : null;
   };
+  G.orderMax = (o) => ({ buy: G.maxBuy, sell: G.maxSell, short: G.maxShort, cover: G.maxCover }[o.side](o.asset));
   SK.orderText = function (o) {
     const a = G.world.byId[o.asset], T = G.orderTrigger(o);
-    const base = o.basis === 'price' ? SK.fmtPx(o.value) : '평단 ' + (o.dir === 'below' ? '-' : '+') + o.value + '%' + (T === null ? '' : '(' + SK.fmtPx(T) + ')');
-    return a.def.name + ' ' + base + (o.dir === 'below' ? ' 이하' : ' 이상') + '이면 ' + SK.fmtQty(o.qty, a) + (o.side === 'buy' ? ' 매수' : ' 매도');
+    const base = o.basis === 'price' ? SK.fmtPx(o.value) : (isShortSide(o.side) ? '매도가 ' : '평단 ') + (o.dir === 'below' ? '-' : '+') + o.value + '%' + (T === null ? '' : '(' + SK.fmtPx(T) + ')');
+    return a.def.name + ' ' + base + (o.dir === 'below' ? ' 이하' : ' 이상') + '이면 ' + SK.fmtQty(o.qty, a) + ' ' + SIDE[o.side];
   };
   G.addOrder = function (o) {
-    const S = G.state, a = G.world.byId[o.asset], h = S.holdings[o.asset];
+    const S = G.state, a = G.world.byId[o.asset], pos = G.orderPos(o), sh = isShortSide(o.side);
     o.qty = a.kind === 'crypto' ? r4(o.qty) : Math.floor(o.qty);
     if (!a.listed || a.dead) return '거래할 수 없는 종목입니다';
-    if (!(o.value > 0)) return o.basis === 'price' ? '기준 가격을 입력하세요' : '평단 대비 몇 %인지 입력하세요';
+    if (sh && a.kind === 'crypto') return '비트코인은 공매도할 수 없습니다';
+    if (!(o.value > 0)) return o.basis === 'price' ? '기준 가격을 입력하세요' : '몇 % 움직이면 주문할지 입력하세요';
     if (!(o.qty > 0)) return '수량을 입력하세요';
-    if (o.basis === 'avg' && !h) return '평단 기준은 보유 중인 종목에만 걸 수 있습니다';
+    if (o.basis === 'avg' && !pos) return sh ? '매도가 기준은 공매도 중인 종목에만 걸 수 있습니다' : '평단 기준은 보유 중인 종목에만 걸 수 있습니다';
     if (o.basis === 'avg' && o.dir === 'below' && o.value >= 100) return '100%보다 작게 입력하세요';
-    if (o.side === 'sell' && !h) return '보유 중인 종목에만 조건 매도를 걸 수 있습니다';
+    if (o.side === 'sell' && !pos) return '보유 중인 종목에만 조건 매도를 걸 수 있습니다';
+    if (o.side === 'cover' && !pos) return '공매도 중인 종목에만 조건 환매수를 걸 수 있습니다';
     if (S.orders.filter((x) => x.asset === o.asset).length >= 5) return '한 종목에 조건 주문은 5개까지입니다';
     o.id = ++S.orderSeq;
     S.orders.push(o);
@@ -324,17 +331,18 @@
       const drop = () => S.orders.splice(S.orders.indexOf(o), 1);
       if (a.dead) { drop(); continue; }
       const T = G.orderTrigger(o);
-      if (T === null) { drop(); log('조건 주문 취소: ' + a.def.name + ' (보유 수량 없음)'); continue; }
+      if (T === null) { drop(); log('조건 주문 취소: ' + a.def.name + ' (잔량 없음)'); continue; }
       if (o.dir === 'below' ? a.price > T : a.price < T) continue;
-      const q = Math.min(o.qty, o.side === 'buy' ? G.maxBuy(a.id) : G.maxSell(a.id));
+      const q = Math.min(o.qty, G.orderMax(o));
       drop();
       if (!(q > 0)) {
-        const note = '조건 주문 취소: ' + a.def.name + (o.side === 'buy' ? ' (현금 부족)' : ' (보유 수량 없음)');
+        const why = { buy: '현금 부족', sell: '보유 수량 없음', cover: G.state.shorts[a.id] ? '현금 부족' : '공매도 잔량 없음', short: G.shortBlock(a.id) ? '공매도 금지 기간' : '담보 부족' }[o.side];
+        const note = '조건 ' + SIDE[o.side] + ' 취소: ' + a.def.name + ' (' + why + ')';
         log(note); out.notes.push(note);
         continue;
       }
-      if (!(o.side === 'buy' ? G.buy(a.id, q) : G.sell(a.id, q))) {
-        out.notes.push('조건 ' + (o.side === 'buy' ? '매수' : '매도') + ' 체결: ' + a.def.name + ' ' + SK.fmtQty(q, a) + ' @ ' + SK.fmtPx(a.price));
+      if (!{ buy: G.buy, sell: G.sell, short: G.short, cover: G.cover }[o.side](a.id, q)) {
+        out.notes.push('조건 ' + SIDE[o.side] + ' 체결: ' + a.def.name + ' ' + SK.fmtQty(q, a) + ' @ ' + SK.fmtPx(a.price));
       }
     }
   }
